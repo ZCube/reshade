@@ -18,9 +18,23 @@
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <imgui_internal.h>
+/////////////////////////////////////////////////////////////////////////////////
+#include <Windows.h>
+/////////////////////////////////////////////////////////////////////////////////
 
 namespace reshade
 {
+/////////////////////////////////////////////////////////////////////////////////
+	typedef int(*TModUnInit)(ImGuiContext* context);
+	typedef int(*TModRender)(ImGuiContext* context);
+	typedef int(*TModInit)(ImGuiContext* context);
+
+	TModUnInit modUnInit = nullptr;
+	TModRender modRender = nullptr;
+	TModInit modInit = nullptr;
+	HMODULE mod = nullptr;
+/////////////////////////////////////////////////////////////////////////////////
+
 	filesystem::path runtime::s_reshade_dll_path, runtime::s_target_executable_path;
 
 	runtime::runtime(uint32_t renderer) :
@@ -78,6 +92,20 @@ namespace reshade
 		imgui_style.ScrollbarRounding = 0.0f;
 		imgui_style.GrabRounding = 0.0f;
 
+		/////////////////////////////////////////////////////////////////////////////////
+		mod = LoadLibraryW((filesystem::get_module_path(nullptr).parent_path() / "mod.dll").wstring().c_str());
+		if (mod)
+		{
+			modInit = (TModInit)GetProcAddress(mod, "ModInit");
+			modRender = (TModInit)GetProcAddress(mod, "ModRender");
+			modUnInit = (TModInit)GetProcAddress(mod, "ModUnInit");
+		}
+		if (modInit)
+		{
+			modInit(ImGui::GetCurrentContext());
+		}
+		/////////////////////////////////////////////////////////////////////////////////
+
 		_imgui_font_atlas->AddFontDefault();
 		const auto font_path = filesystem::get_special_folder_path(filesystem::special_folder::windows) / "Fonts" / "consolab.ttf";
 		if (filesystem::exists(font_path))
@@ -90,6 +118,12 @@ namespace reshade
 	runtime::~runtime()
 	{
 		ImGui::SetCurrentContext(_imgui_context);
+/////////////////////////////////////////////////////////////////////////////////
+		if (modUnInit)
+		{
+			modUnInit(ImGui::GetCurrentContext());
+		}
+/////////////////////////////////////////////////////////////////////////////////
 
 		ImGui::Shutdown();
 		ImGui::DestroyContext(_imgui_context);
@@ -969,7 +1003,7 @@ namespace reshade
 			_show_menu = !_show_menu;
 		}
 
-		if (!(_show_menu || _show_clock || _show_framerate || _show_error_log || show_splash))
+		if (!(_show_menu || _show_clock || _show_framerate || _show_error_log || show_splash || modRender))
 		{
 			_input->block_mouse_input(false);
 			_input->block_keyboard_input(false);
@@ -1016,6 +1050,13 @@ namespace reshade
 		// Create ImGui widgets and windows
 		ImGui::NewFrame();
 		_effects_expanded_state &= 2;
+
+		/////////////////////////////////////////////////////////////////////////////////
+		if (modRender)
+		{
+			modRender(ImGui::GetCurrentContext());
+		}
+		/////////////////////////////////////////////////////////////////////////////////
 
 		if (show_splash)
 		{
