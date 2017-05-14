@@ -93,7 +93,7 @@ namespace reshade
 		imgui_style.GrabRounding = 0.0f;
 
 		/////////////////////////////////////////////////////////////////////////////////
-		mod = LoadLibraryW((filesystem::get_module_path(nullptr).parent_path() / "mod.dll").wstring().c_str());
+		mod = LoadLibraryW((filesystem::get_module_path(nullptr).parent_path() / (filesystem::get_module_path(nullptr).filename_without_extension().string() + "_mod.dll")).wstring().c_str());
 		if (mod)
 		{
 			modInit = (TModInit)GetProcAddress(mod, "ModInit");
