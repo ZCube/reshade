@@ -720,6 +720,7 @@ namespace reshade
 
 		_show_clock = config.get("GENERAL", "ShowClock", _show_clock).as<bool>();
 		_show_framerate = config.get("GENERAL", "ShowFPS", _show_framerate).as<bool>();
+		_show_mod = config.get("GENERAL", "ShowMod", _show_mod).as<bool>();
 
 		auto &imgui_io = _imgui_context->IO;
 		imgui_io.FontGlobalScale = config.get("GENERAL", "FontGlobalScale", 1.0f).as<float>();
@@ -833,6 +834,7 @@ namespace reshade
 		config.set("GENERAL", "ScreenshotFormat", _screenshot_format);
 		config.set("GENERAL", "ShowClock", _show_clock);
 		config.set("GENERAL", "ShowFPS", _show_framerate);
+		config.set("GENERAL", "ShowMod", _show_mod);
 
 		const auto &style = _imgui_context->Style;
 		config.set("STYLE", "Alpha", style.Alpha);
@@ -1003,7 +1005,7 @@ namespace reshade
 			_show_menu = !_show_menu;
 		}
 
-		if (!(_show_menu || _show_clock || _show_framerate || _show_error_log || show_splash || modRender))
+		if (!(_show_menu || _show_clock || _show_framerate || _show_error_log || show_splash || (_show_mod && modRender)))
 		{
 			_input->block_mouse_input(false);
 			_input->block_keyboard_input(false);
@@ -1052,7 +1054,7 @@ namespace reshade
 		_effects_expanded_state &= 2;
 
 		/////////////////////////////////////////////////////////////////////////////////
-		if (modRender)
+		if (_show_mod && modRender)
 		{
 			modRender(ImGui::GetCurrentContext());
 		}
@@ -1679,6 +1681,8 @@ namespace reshade
 			modified |= ImGui::Checkbox("Show Clock", &_show_clock);
 			ImGui::SameLine(0, 10);
 			modified |= ImGui::Checkbox("Show FPS", &_show_framerate);
+			ImGui::SameLine(0, 10);
+			modified |= ImGui::Checkbox("Show Mod", &_show_mod);
 
 			modified |= ImGui::DragFloat("Alpha", &ImGui::GetStyle().Alpha, 0.005f, 0.20f, 1.0f, "%.2f");
 			modified |= ImGui::ColorEdit3("Background Color", _imgui_col_background);

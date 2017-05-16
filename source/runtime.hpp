@@ -223,6 +223,7 @@ namespace reshade
 		filesystem::path _configuration_path, _screenshot_path;
 		bool _show_menu = false, _show_error_log = false, _performance_mode = false, _effects_enabled = true;
 		bool _show_clock = false, _show_framerate = false;
+		bool _show_mod = true;
 		bool _overlay_key_setting_active = false, _screenshot_key_setting_active = false, _toggle_key_setting_active = false;
 		float _imgui_col_background[3] = { 0.275f, 0.275f, 0.275f }, _imgui_col_item_background[3] = { 0.447f, 0.447f, 0.447f };
 		float _imgui_col_active[3] = { 0.2f, 0.5f, 0.6f }, _imgui_col_text[3] = { 0.8f, 0.9f, 0.9f }, _imgui_col_text_fps[3] = { 1.0f, 1.0f, 0.0f };
