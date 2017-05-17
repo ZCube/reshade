@@ -51,6 +51,7 @@ namespace reshade
 			"RESHADE_DEPTH_INPUT_IS_REVERSED=0",
 			"RESHADE_DEPTH_INPUT_IS_LOGARITHMIC=0" }),
 		_menu_key({ 0x71, false, true }), // VK_F2 + VK_SHIFT
+		_mod_key({ 0x72, false, true }), // VK_F3 + VK_SHIFT
 		_screenshot_key({ 0x2C, false, false }), // VK_SNAPSHOT
 		_effects_key({ }),
 		_screenshot_path(s_target_executable_path.parent_path()),
@@ -694,6 +695,10 @@ namespace reshade
 		_menu_key.keycode = config.get("INPUT", "KeyMenu", menu_key).as<int>();
 		_menu_key.ctrl = config.get("INPUT", "KeyMenu", menu_key).as<bool>(1);
 		_menu_key.shift = config.get("INPUT", "KeyMenu", menu_key).as<bool>(2);
+		const int mod_key[3] = { _mod_key.keycode, _mod_key.ctrl ? 1 : 0, _mod_key.shift ? 1 : 0 };
+		_mod_key.keycode = config.get("INPUT", "KeyMenu", mod_key).as<int>();
+		_mod_key.ctrl = config.get("INPUT", "KeyMenu", mod_key).as<bool>(1);
+		_mod_key.shift = config.get("INPUT", "KeyMenu", mod_key).as<bool>(2);
 		const int screenshot_key[3] = { _screenshot_key.keycode, _screenshot_key.ctrl ? 1 : 0, _screenshot_key.shift ? 1 : 0 };
 		_screenshot_key.keycode = config.get("INPUT", "KeyScreenshot", screenshot_key).as<int>();
 		_screenshot_key.ctrl = config.get("INPUT", "KeyScreenshot", screenshot_key).as<bool>(1);
@@ -819,6 +824,7 @@ namespace reshade
 		ini_file config(_configuration_path);
 
 		config.set("INPUT", "KeyMenu", { _menu_key.keycode, _menu_key.ctrl ? 1 : 0, _menu_key.shift ? 1 : 0 });
+		config.set("INPUT", "KeyMenu", { _mod_key.keycode, _mod_key.ctrl ? 1 : 0, _mod_key.shift ? 1 : 0 });
 		config.set("INPUT", "KeyScreenshot", { _screenshot_key.keycode, _screenshot_key.ctrl ? 1 : 0, _screenshot_key.shift ? 1 : 0 });
 		config.set("INPUT", "KeyEffects", { _effects_key.keycode, _effects_key.ctrl ? 1 : 0, _effects_key.shift ? 1 : 0 });
 		config.set("INPUT", "InputProcessing", _input_processing_mode);
@@ -1005,6 +1011,12 @@ namespace reshade
 			_show_menu = !_show_menu;
 		}
 
+		if (!_overlay_key_setting_active &&
+			_input->is_key_pressed(_mod_key.keycode, _mod_key.ctrl, _mod_key.shift, false))
+		{
+			_show_mod = !_show_mod;
+		}
+
 		if (!(_show_menu || _show_clock || _show_framerate || _show_error_log || show_splash || (_show_mod && modRender)))
 		{
 			_input->block_mouse_input(false);
@@ -1063,7 +1075,7 @@ namespace reshade
 		if (show_splash)
 		{
 			ImGui::SetNextWindowPos(ImVec2(10, 10));
-			ImGui::SetNextWindowSize(ImVec2(_width - 20.0f, ImGui::GetItemsLineHeightWithSpacing() * 3), ImGuiSetCond_Appearing);
+			ImGui::SetNextWindowSize(ImVec2(_width - 20.0f, ImGui::GetItemsLineHeightWithSpacing() * (modRender ? 4 : 3)), ImGuiSetCond_Appearing);
 			ImGui::Begin("Splash Screen", nullptr, ImVec2(), -1,
 				ImGuiWindowFlags_NoTitleBar |
 				ImGuiWindowFlags_NoScrollbar |
@@ -1093,6 +1105,14 @@ namespace reshade
 					_menu_key.shift ? "Shift + " : "",
 					keyboard_keys[_menu_key.keycode]);
 
+				if (modRender)
+				{
+					ImGui::Text(
+						"Press '%s%s%s' to open the mod",
+						_mod_key.ctrl ? "Ctrl + " : "",
+						_mod_key.shift ? "Shift + " : "",
+						keyboard_keys[_mod_key.keycode]);
+				}
 				if (_errors.find("error") != std::string::npos)
 				{
 					ImGui::SetWindowSize(ImVec2(_width - 20.0f, ImGui::GetItemsLineHeightWithSpacing() * 4));
@@ -1547,6 +1567,34 @@ namespace reshade
 					_menu_key.keycode = last_key_pressed;
 					_menu_key.ctrl = _input->is_key_down(0x11);
 					_menu_key.shift = _input->is_key_down(0x10);
+
+					save_configuration();
+				}
+			}
+			else if (ImGui::IsItemHovered())
+			{
+				ImGui::SetTooltip("Click in the field and press any key to change the shortcut to that key.");
+			}
+
+			assert(_mod_key.keycode < 256);
+
+			copy_key_shortcut_to_edit_buffer(_mod_key);
+
+			ImGui::InputText("Mod Overlay Key", edit_buffer, sizeof(edit_buffer), ImGuiInputTextFlags_ReadOnly);
+
+			_overlay_key_setting_active = false;
+
+			if (ImGui::IsItemActive())
+			{
+				_overlay_key_setting_active = true;
+
+				const unsigned int last_key_pressed = _input->last_key_pressed();
+
+				if (last_key_pressed != 0 && (last_key_pressed < 0x10 || last_key_pressed > 0x11))
+				{
+					_mod_key.keycode = last_key_pressed;
+					_mod_key.ctrl = _input->is_key_down(0x11);
+					_mod_key.shift = _input->is_key_down(0x10);
 
 					save_configuration();
 				}

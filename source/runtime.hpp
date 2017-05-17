@@ -219,7 +219,7 @@ namespace reshade
 		std::string _errors;
 		std::vector<std::string> _preprocessor_definitions;
 		int _menu_index = 0, _screenshot_format = 0, _current_preset = -1, _selected_technique = -1, _input_processing_mode = 2;
-		key_shortcut _menu_key, _screenshot_key, _effects_key;
+		key_shortcut _menu_key, _screenshot_key, _effects_key, _mod_key;
 		filesystem::path _configuration_path, _screenshot_path;
 		bool _show_menu = false, _show_error_log = false, _performance_mode = false, _effects_enabled = true;
 		bool _show_clock = false, _show_framerate = false;
