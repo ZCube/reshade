@@ -694,9 +694,9 @@ namespace reshade
 		_menu_key.ctrl = config.get("INPUT", "KeyMenu", menu_key).as<bool>(1);
 		_menu_key.shift = config.get("INPUT", "KeyMenu", menu_key).as<bool>(2);
 		const int mod_key[3] = { _mod_key.keycode, _mod_key.ctrl ? 1 : 0, _mod_key.shift ? 1 : 0 };
-		_mod_key.keycode = config.get("INPUT", "KeyMenu", mod_key).as<int>();
-		_mod_key.ctrl = config.get("INPUT", "KeyMenu", mod_key).as<bool>(1);
-		_mod_key.shift = config.get("INPUT", "KeyMenu", mod_key).as<bool>(2);
+		_mod_key.keycode = config.get("INPUT", "KeyMod", mod_key).as<int>();
+		_mod_key.ctrl = config.get("INPUT", "KeyMod", mod_key).as<bool>(1);
+		_mod_key.shift = config.get("INPUT", "KeyMod", mod_key).as<bool>(2);
 		const int screenshot_key[3] = { _screenshot_key.keycode, _screenshot_key.ctrl ? 1 : 0, _screenshot_key.shift ? 1 : 0 };
 		_screenshot_key.keycode = config.get("INPUT", "KeyScreenshot", screenshot_key).as<int>();
 		_screenshot_key.ctrl = config.get("INPUT", "KeyScreenshot", screenshot_key).as<bool>(1);
@@ -822,7 +822,7 @@ namespace reshade
 		ini_file config(_configuration_path);
 
 		config.set("INPUT", "KeyMenu", { _menu_key.keycode, _menu_key.ctrl ? 1 : 0, _menu_key.shift ? 1 : 0 });
-		config.set("INPUT", "KeyMenu", { _mod_key.keycode, _mod_key.ctrl ? 1 : 0, _mod_key.shift ? 1 : 0 });
+		config.set("INPUT", "KeyMod", { _mod_key.keycode, _mod_key.ctrl ? 1 : 0, _mod_key.shift ? 1 : 0 });
 		config.set("INPUT", "KeyScreenshot", { _screenshot_key.keycode, _screenshot_key.ctrl ? 1 : 0, _screenshot_key.shift ? 1 : 0 });
 		config.set("INPUT", "KeyEffects", { _effects_key.keycode, _effects_key.ctrl ? 1 : 0, _effects_key.shift ? 1 : 0 });
 		config.set("INPUT", "InputProcessing", _input_processing_mode);
