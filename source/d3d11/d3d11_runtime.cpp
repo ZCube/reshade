@@ -411,11 +411,64 @@ namespace reshade::d3d11
 			return false;
 		}
 
-		d3d11_tex_data obj = { };
+		d3d11_tex_data obj = {};
 		obj.texture = font_atlas;
 		obj.srv[0] = font_atlas_view;
 
 		_imgui_font_atlas_texture = std::make_unique<d3d11_tex_data>(obj);
+
+		return true;
+	}
+	bool d3d11_runtime::init_imgui_mod_atlas()
+	{
+		if (!modTextureData)
+			return true;
+
+		int width, height, bits_per_pixel;
+		unsigned char *pixels;
+
+		ImGui::SetCurrentContext(_imgui_context);
+		modTextureData(&pixels, &width, &height, &bits_per_pixel);
+
+		if (pixels == nullptr)
+			return true;
+
+		const D3D11_TEXTURE2D_DESC tex_desc = {
+			static_cast<UINT>(width),
+			static_cast<UINT>(height),
+			1, 1,
+			DXGI_FORMAT_R8G8B8A8_UNORM,
+			{ 1, 0 },
+			D3D11_USAGE_DEFAULT,
+			D3D11_BIND_SHADER_RESOURCE
+		};
+		const D3D11_SUBRESOURCE_DATA tex_data = {
+			pixels,
+			tex_desc.Width * 4
+		};
+
+		com_ptr<ID3D11Texture2D> font_atlas;
+		com_ptr<ID3D11ShaderResourceView> font_atlas_view;
+
+		HRESULT hr = _device->CreateTexture2D(&tex_desc, &tex_data, &font_atlas);
+
+		if (FAILED(hr))
+		{
+			return false;
+		}
+
+		hr = _device->CreateShaderResourceView(font_atlas.get(), nullptr, &font_atlas_view);
+
+		if (FAILED(hr))
+		{
+			return false;
+		}
+
+		d3d11_tex_data obj = {};
+		obj.texture = font_atlas;
+		obj.srv[0] = font_atlas_view;
+
+		_imgui_mod_atlas_texture = std::make_unique<d3d11_tex_data>(obj);
 
 		return true;
 	}
@@ -432,6 +485,7 @@ namespace reshade::d3d11
 			!init_default_depth_stencil() ||
 			!init_fx_resources() ||
 			!init_imgui_resources() ||
+			!init_imgui_mod_atlas() ||
 			!init_imgui_font_atlas())
 		{
 			return false;

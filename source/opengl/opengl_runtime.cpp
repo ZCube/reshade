@@ -313,10 +313,39 @@ namespace reshade::opengl
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
 
-		opengl_tex_data obj = { };
+		opengl_tex_data obj = {};
 		obj.id[0] = font_atlas_id;
 
 		_imgui_font_atlas_texture = std::make_unique<opengl_tex_data>(obj);
+
+		return true;
+	}
+	bool opengl_runtime::init_imgui_mod_atlas()
+	{
+		if (!modTextureData)
+			return true;
+
+		int width, height, bits_per_pixel;
+		unsigned char *pixels;
+
+		ImGui::SetCurrentContext(_imgui_context);
+		modTextureData(&pixels, &width, &height, &bits_per_pixel);
+
+		if (pixels == nullptr)
+			return true;
+
+		GLuint font_atlas_id = 0;
+
+		glGenTextures(1, &font_atlas_id);
+		glBindTexture(GL_TEXTURE_2D, font_atlas_id);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+		opengl_tex_data obj = {};
+		obj.id[0] = font_atlas_id;
+
+		_imgui_mod_atlas_texture = std::make_unique<opengl_tex_data>(obj);
 
 		return true;
 	}
@@ -335,6 +364,7 @@ namespace reshade::opengl
 			!init_default_depth_stencil() ||
 			!init_fx_resources() ||
 			!init_imgui_resources() ||
+			!init_imgui_mod_atlas() ||
 			!init_imgui_font_atlas())
 		{
 			_stateblock.apply();

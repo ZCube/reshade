@@ -176,6 +176,45 @@ namespace reshade::d3d9
 
 		return true;
 	}
+	bool d3d9_runtime::init_imgui_mod_atlas()
+	{
+		if (!modTextureData)
+			return true;
+
+		int width, height, bits_per_pixel;
+		unsigned char *pixels;
+
+		ImGui::SetCurrentContext(_imgui_context);
+		modTextureData(&pixels, &width, &height, &bits_per_pixel);
+
+		if (pixels == nullptr)
+			return true;
+
+		D3DLOCKED_RECT font_atlas_rect;
+		com_ptr<IDirect3DTexture9> font_atlas;
+
+		const HRESULT hr = _device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &font_atlas, nullptr);
+
+		if (FAILED(hr) || FAILED(font_atlas->LockRect(0, &font_atlas_rect, nullptr, 0)))
+		{
+			LOG(ERROR) << "Failed to create font atlas texture! HRESULT is '" << std::hex << hr << std::dec << "'.";
+			return false;
+		}
+
+		for (int y = 0; y < height; y++)
+		{
+			std::memcpy(static_cast<BYTE *>(font_atlas_rect.pBits) + font_atlas_rect.Pitch * y, pixels + (width * bits_per_pixel) * y, width * bits_per_pixel);
+		}
+
+		font_atlas->UnlockRect(0);
+
+		d3d9_tex_data obj = {};
+		obj.texture = font_atlas;
+
+		_imgui_mod_atlas_texture = std::make_unique<d3d9_tex_data>(obj);
+
+		return true;
+	}
 
 	bool d3d9_runtime::on_init(const D3DPRESENT_PARAMETERS &pp)
 	{
@@ -193,6 +232,7 @@ namespace reshade::d3d9
 		if (!init_backbuffer_texture() ||
 			!init_default_depth_stencil() ||
 			!init_fx_resources() ||
+			!init_imgui_mod_atlas() ||
 			!init_imgui_font_atlas())
 		{
 			return false;

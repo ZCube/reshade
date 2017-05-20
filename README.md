@@ -1,3 +1,8 @@
+## Important
+
+This repository is not official. Modified for overlay mod.
+Please use https://github.com/crosire/reshade and https://reshade.me
+
 ReShade
 =======
 

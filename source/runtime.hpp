@@ -9,6 +9,10 @@
 #include "filesystem.hpp"
 #include "runtime_objects.hpp"
 
+/////////////////////////////////////////////////////////////////////////////////
+#include <Windows.h>
+/////////////////////////////////////////////////////////////////////////////////
+
 #pragma region Forward Declarations
 struct ImDrawData;
 struct ImFontAtlas;
@@ -187,6 +191,22 @@ namespace reshade
 		std::vector<texture> _textures;
 		std::vector<uniform> _uniforms;
 		std::vector<technique> _techniques;
+
+		/////////////////////////////////////////////////////////////////////////////////
+		typedef int(*TModUnInit)(ImGuiContext* context);
+		typedef int(*TModRender)(ImGuiContext* context);
+		typedef int(*TModInit)(ImGuiContext* context);
+		typedef void(*TModTextureData)(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel);
+		typedef void(*TModSetTexture)(void* texture);
+
+		TModUnInit modUnInit = nullptr;
+		TModRender modRender = nullptr;
+		TModInit modInit = nullptr;
+		TModTextureData modTextureData = nullptr;
+		TModSetTexture modSetTexture = nullptr;
+		HMODULE mod;
+		std::unique_ptr<base_object> _imgui_mod_atlas_texture;
+		/////////////////////////////////////////////////////////////////////////////////
 
 	private:
 		struct key_shortcut { int keycode; bool ctrl, shift; };

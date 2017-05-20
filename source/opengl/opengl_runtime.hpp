@@ -92,6 +92,7 @@ namespace reshade::opengl
 		bool init_fx_resources();
 		bool init_imgui_resources();
 		bool init_imgui_font_atlas();
+		bool init_imgui_mod_atlas();
 
 		void detect_depth_source();
 		void create_depth_texture(GLuint width, GLuint height, GLenum format);

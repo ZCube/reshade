@@ -15,26 +15,13 @@
 #include <stb_image_dds.h>
 #include <stb_image_write.h>
 #include <stb_image_resize.h>
+#include <iostream>
 #define IMGUI_DEFINE_MATH_OPERATORS
 #include <imgui.h>
 #include <imgui_internal.h>
-/////////////////////////////////////////////////////////////////////////////////
-#include <Windows.h>
-/////////////////////////////////////////////////////////////////////////////////
 
 namespace reshade
 {
-/////////////////////////////////////////////////////////////////////////////////
-	typedef int(*TModUnInit)(ImGuiContext* context);
-	typedef int(*TModRender)(ImGuiContext* context);
-	typedef int(*TModInit)(ImGuiContext* context);
-
-	TModUnInit modUnInit = nullptr;
-	TModRender modRender = nullptr;
-	TModInit modInit = nullptr;
-	HMODULE mod = nullptr;
-/////////////////////////////////////////////////////////////////////////////////
-
 	filesystem::path runtime::s_reshade_dll_path, runtime::s_target_executable_path;
 
 	runtime::runtime(uint32_t renderer) :
@@ -102,6 +89,8 @@ namespace reshade
 			modInit = (TModInit)GetProcAddress(mod, "ModInit");
 			modRender = (TModInit)GetProcAddress(mod, "ModRender");
 			modUnInit = (TModInit)GetProcAddress(mod, "ModUnInit");
+			modTextureData = (TModTextureData)GetProcAddress(mod, "ModTextureData");
+			modSetTexture = (TModSetTexture)GetProcAddress(mod, "ModSetTexture");
 		}
 		if (modInit)
 		{
@@ -125,6 +114,11 @@ namespace reshade
 		if (modUnInit)
 		{
 			modUnInit(ImGui::GetCurrentContext());
+		}
+		if (mod)
+		{
+			FreeLibrary(mod);
+			mod = nullptr;
 		}
 /////////////////////////////////////////////////////////////////////////////////
 
@@ -155,6 +149,7 @@ namespace reshade
 		}
 
 		_imgui_font_atlas_texture.reset();
+		_imgui_mod_atlas_texture.reset();
 
 		LOG(INFO) << "Destroyed runtime environment on runtime " << this << ".";
 
@@ -616,6 +611,7 @@ namespace reshade
 	void runtime::load_textures()
 	{
 		LOG(INFO) << "Loading image files for textures ...";
+		std::cout << "Loading image files for textures ..." << std::endl;
 
 		for (auto &texture : _textures)
 		{
@@ -1034,6 +1030,12 @@ namespace reshade
 		imgui_io.DisplaySize.x = static_cast<float>(_width);
 		imgui_io.DisplaySize.y = static_cast<float>(_height);
 		imgui_io.Fonts->TexID = _imgui_font_atlas_texture.get();
+		/////////////////////////////////////////////////////////////////////////////////
+		if (modSetTexture)
+		{
+			modSetTexture(_imgui_mod_atlas_texture.get());
+		}
+		/////////////////////////////////////////////////////////////////////////////////
 		imgui_io.MouseDrawCursor = _show_menu;
 
 		imgui_io.KeyCtrl = _input->is_key_down(0x11); // VK_CONTROL
@@ -1077,7 +1079,7 @@ namespace reshade
 		if (show_splash)
 		{
 			ImGui::SetNextWindowPos(ImVec2(10, 10));
-			ImGui::SetNextWindowSize(ImVec2(_width - 20.0f, ImGui::GetItemsLineHeightWithSpacing() * (modRender ? 4 : 3)), ImGuiSetCond_Appearing);
+			ImGui::SetNextWindowSize(ImVec2(_width - 20.0f, ImGui::GetItemsLineHeightWithSpacing() * (modRender ? 6 : 5)), ImGuiSetCond_Appearing);
 			ImGui::Begin("Splash Screen", nullptr, ImVec2(), -1,
 				ImGuiWindowFlags_NoTitleBar |
 				ImGuiWindowFlags_NoScrollbar |
@@ -1089,6 +1091,8 @@ namespace reshade
 
 			ImGui::TextUnformatted("ReShade " VERSION_STRING_FILE " by crosire");
 			ImGui::TextUnformatted("Visit http://reshade.me for news, updates, shaders and discussion.");
+			ImGui::TextUnformatted("Modified by zcubekr for overlay mod so version is inaccurate and not clean binary");
+			ImGui::TextUnformatted("Use original distribution from hompage is recommended.");
 
 			ImGui::Spacing();
 
