@@ -49,14 +49,14 @@ namespace reshade
 		if (!filesystem::exists(_configuration_path))
 			_configuration_path = s_reshade_dll_path.parent_path() / "ReShade.ini";
 
-		_imgui_configuration_path = s_reshade_dll_path.parent_path() / "ImGui.ini";
+		//_imgui_configuration_path = s_reshade_dll_path.parent_path() / "ImGui.ini";
 
 		ImGui::SetCurrentContext(_imgui_context);
 
 		auto &imgui_io = _imgui_context->IO;
 		auto &imgui_style = _imgui_context->Style;
 		imgui_io.Fonts = _imgui_font_atlas.get();
-		imgui_io.IniFilename = _imgui_configuration_path.string().c_str();
+		imgui_io.IniFilename = nullptr; // _imgui_configuration_path.string().c_str();
 		imgui_io.KeyMap[ImGuiKey_Tab] = 0x09; // VK_TAB
 		imgui_io.KeyMap[ImGuiKey_LeftArrow] = 0x25; // VK_LEFT
 		imgui_io.KeyMap[ImGuiKey_RightArrow] = 0x27; // VK_RIGHT
