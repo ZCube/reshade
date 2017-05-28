@@ -117,7 +117,12 @@ namespace reshade
 		}
 		if (mod)
 		{
-			FreeLibrary(mod);
+			modInit = nullptr;
+			modRender = nullptr;
+			modUnInit = nullptr;
+			modTextureData = nullptr;
+			modSetTexture = nullptr;
+			//FreeLibrary(mod);
 			mod = nullptr;
 		}
 /////////////////////////////////////////////////////////////////////////////////
