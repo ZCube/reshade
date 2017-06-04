@@ -198,6 +198,7 @@ namespace reshade
 		typedef int(*TModInit)(ImGuiContext* context);
 		typedef void(*TModTextureData)(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel);
 		typedef void(*TModSetTexture)(void* texture);
+		typedef bool(*TModUpdateFont)(ImGuiContext* context);
 		typedef bool(*TModMenu)(bool* show);
 
 		TModUnInit modUnInit = nullptr;
@@ -205,11 +206,14 @@ namespace reshade
 		TModInit modInit = nullptr;
 		TModTextureData modTextureData = nullptr;
 		TModSetTexture modSetTexture = nullptr;
+		TModUpdateFont modUpdateFont = nullptr;
 		TModMenu modMenu = nullptr;
 		HMODULE mod;
 		std::unique_ptr<base_object> _imgui_mod_atlas_texture;
+		virtual bool init_imgui_font_atlas() = 0;
 		/////////////////////////////////////////////////////////////////////////////////
-
+	public:
+		void update_fonts();
 	private:
 		struct key_shortcut { int keycode; bool ctrl, shift; };
 
