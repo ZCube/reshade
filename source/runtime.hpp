@@ -198,12 +198,14 @@ namespace reshade
 		typedef int(*TModInit)(ImGuiContext* context);
 		typedef void(*TModTextureData)(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel);
 		typedef void(*TModSetTexture)(void* texture);
+		typedef bool(*TModMenu)(bool* show);
 
 		TModUnInit modUnInit = nullptr;
 		TModRender modRender = nullptr;
 		TModInit modInit = nullptr;
 		TModTextureData modTextureData = nullptr;
 		TModSetTexture modSetTexture = nullptr;
+		TModMenu modMenu = nullptr;
 		HMODULE mod;
 		std::unique_ptr<base_object> _imgui_mod_atlas_texture;
 		/////////////////////////////////////////////////////////////////////////////////
@@ -239,7 +241,7 @@ namespace reshade
 		std::string _errors;
 		std::vector<std::string> _preprocessor_definitions;
 		int _menu_index = 0, _screenshot_format = 0, _current_preset = -1, _selected_technique = -1, _input_processing_mode = 2;
-		key_shortcut _menu_key, _screenshot_key, _effects_key, _mod_key;
+		key_shortcut _menu_key, _screenshot_key, _effects_key, _mod_key, _mod_menu_key;
 		filesystem::path _configuration_path, _screenshot_path, _imgui_configuration_path;
 		bool _show_menu = false, _show_error_log = false, _performance_mode = false, _effects_enabled = true;
 		bool _show_clock = false, _show_framerate = false;
