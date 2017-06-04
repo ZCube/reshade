@@ -102,7 +102,8 @@ namespace reshade
 	struct technique final
 	{
 		std::string name, effect_filename;
-		std::vector<std::unique_ptr<base_object>> passes;
+		// vc 2017 error unique_ptr -> shared_ptr
+		std::vector<std::shared_ptr<base_object>> passes;
 		std::unordered_map<std::string, variant> annotations;
 		bool enabled = false, hidden = false;
 		int timeout = 0, timeleft = 0, toggle_key = 0;
