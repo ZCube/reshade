@@ -93,7 +93,6 @@ namespace reshade
 			modTextureData = (TModTextureData)GetProcAddress(mod, "ModTextureData");
 			modSetTexture = (TModSetTexture)GetProcAddress(mod, "ModSetTexture");
 			modMenu = (TModMenu)GetProcAddress(mod, "ModMenu");
-			modUpdateFont = (TModUpdateFont)GetProcAddress(mod, "ModUpdateFont");
 		}
 		if (modInit)
 		{
@@ -176,24 +175,8 @@ namespace reshade
 		_uniform_count = 0;
 		_technique_count = 0;
 	}
-
-	void runtime::update_fonts()
-	{
-		/////////////////////////////////////////////////////////////////////////////////
-		if (modUpdateFont)
-		{
-			if (modUpdateFont(_imgui_context))
-			{
-				_imgui_font_atlas_texture.reset();
-				init_imgui_font_atlas();
-			}
-		}
-		/////////////////////////////////////////////////////////////////////////////////
-	}
-
 	void runtime::on_present()
 	{
-		update_fonts();
 		// Get current time and date
 		time_t t = std::time(nullptr); tm tm;
 		localtime_s(&tm, &t);

@@ -91,7 +91,7 @@ namespace reshade::opengl
 		bool init_default_depth_stencil();
 		bool init_fx_resources();
 		bool init_imgui_resources();
-		virtual bool init_imgui_font_atlas();
+		bool init_imgui_font_atlas();
 		bool init_imgui_mod_atlas();
 
 		void detect_depth_source();
