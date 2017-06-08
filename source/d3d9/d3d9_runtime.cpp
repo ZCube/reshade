@@ -190,26 +190,32 @@ namespace reshade::d3d9
 		if (pixels == nullptr)
 			return true;
 
-		D3DLOCKED_RECT font_atlas_rect;
-		com_ptr<IDirect3DTexture9> font_atlas;
+		D3DLOCKED_RECT mod_atlas_rect;
+		com_ptr<IDirect3DTexture9> mod_atlas;
 
-		const HRESULT hr = _device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &font_atlas, nullptr);
+		const HRESULT hr = _device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &mod_atlas, nullptr);
 
-		if (FAILED(hr) || FAILED(font_atlas->LockRect(0, &font_atlas_rect, nullptr, 0)))
+		if (FAILED(hr) || FAILED(mod_atlas->LockRect(0, &mod_atlas_rect, nullptr, 0)))
 		{
 			LOG(ERROR) << "Failed to create font atlas texture! HRESULT is '" << std::hex << hr << std::dec << "'.";
 			return false;
 		}
-
 		for (int y = 0; y < height; y++)
 		{
-			std::memcpy(static_cast<BYTE *>(font_atlas_rect.pBits) + font_atlas_rect.Pitch * y, pixels + (width * bits_per_pixel) * y, width * bits_per_pixel);
+			BYTE* mapped_data = static_cast<BYTE *>(mod_atlas_rect.pBits) + mod_atlas_rect.Pitch * y;
+			BYTE* data = pixels + (width * bits_per_pixel) * y;
+			const int size = width * bits_per_pixel;
+			for (UINT i = 0; i < size; i += 4, mapped_data += 4)
+				mapped_data[0] = data[i + 2],
+				mapped_data[1] = data[i + 1],
+				mapped_data[2] = data[i],
+				mapped_data[3] = data[i + 3];
 		}
 
-		font_atlas->UnlockRect(0);
+		mod_atlas->UnlockRect(0);
 
 		d3d9_tex_data obj = {};
-		obj.texture = font_atlas;
+		obj.texture = mod_atlas;
 
 		_imgui_mod_atlas_texture = std::make_unique<d3d9_tex_data>(obj);
 
