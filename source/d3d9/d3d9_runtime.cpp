@@ -193,7 +193,7 @@ namespace reshade::d3d9
 		D3DLOCKED_RECT font_atlas_rect;
 		com_ptr<IDirect3DTexture9> font_atlas;
 
-		const HRESULT hr = _device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8B8G8R8, D3DPOOL_DEFAULT, &font_atlas, nullptr);
+		const HRESULT hr = _device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &font_atlas, nullptr);
 
 		if (FAILED(hr) || FAILED(font_atlas->LockRect(0, &font_atlas_rect, nullptr, 0)))
 		{
