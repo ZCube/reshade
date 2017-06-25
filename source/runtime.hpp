@@ -196,8 +196,11 @@ namespace reshade
 		typedef int(*TModUnInit)(ImGuiContext* context);
 		typedef int(*TModRender)(ImGuiContext* context);
 		typedef int(*TModInit)(ImGuiContext* context);
-		typedef void(*TModTextureData)(unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel);
-		typedef void(*TModSetTexture)(void* texture);
+		typedef void(*TModTextureData)(int index, unsigned char** out_pixels, int* out_width, int* out_height, int* out_bytes_per_pixel);
+		typedef bool(*TModGetTextureDirtyRect)(int index, int dindex, RECT* rect);
+		typedef void(*TModSetTexture)(int index, void* texture);
+		typedef int(*TModTextureBegin)();
+		typedef void(*TModTextureEnd)();
 		typedef bool(*TModUpdateFont)(ImGuiContext* context);
 		typedef bool(*TModMenu)(bool* show);
 
@@ -205,12 +208,18 @@ namespace reshade
 		TModRender modRender = nullptr;
 		TModInit modInit = nullptr;
 		TModTextureData modTextureData = nullptr;
+		TModGetTextureDirtyRect modGetTextureDirtyRect = nullptr;
 		TModSetTexture modSetTexture = nullptr;
+		TModTextureBegin modTextureBegin = nullptr;
+		TModTextureEnd modTextureEnd = nullptr;
 		TModUpdateFont modUpdateFont = nullptr;
 		TModMenu modMenu = nullptr;
 		HMODULE mod;
-		std::unique_ptr<base_object> _imgui_mod_atlas_texture;
+		std::vector<std::unique_ptr<base_object> > _imgui_mod_atlas_textures;
 		virtual bool init_imgui_font_atlas() = 0;
+		virtual bool init_imgui_mod_atlas(int texidx) = 0;
+		virtual bool update_imgui_mod_atlas(int texidx) = 0;
+		bool init_imgui_mod_atlases();
 		/////////////////////////////////////////////////////////////////////////////////
 	public:
 		void update_fonts();

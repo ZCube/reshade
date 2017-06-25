@@ -176,16 +176,18 @@ namespace reshade::d3d9
 
 		return true;
 	}
-	bool d3d9_runtime::init_imgui_mod_atlas()
+	bool d3d9_runtime::init_imgui_mod_atlas(int texidx)
 	{
 		if (!modTextureData)
 			return true;
+
+		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
 
 		int width, height, bits_per_pixel;
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(&pixels, &width, &height, &bits_per_pixel);
+		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
@@ -206,9 +208,9 @@ namespace reshade::d3d9
 			BYTE* data = pixels + (width * bits_per_pixel) * y;
 			const int size = width * bits_per_pixel;
 			for (UINT i = 0; i < size; i += 4, mapped_data += 4)
-				mapped_data[0] = data[i + 2],
+				mapped_data[0] = data[i + 0],
 				mapped_data[1] = data[i + 1],
-				mapped_data[2] = data[i],
+				mapped_data[2] = data[i + 2],
 				mapped_data[3] = data[i + 3];
 		}
 
@@ -218,6 +220,84 @@ namespace reshade::d3d9
 		obj.texture = mod_atlas;
 
 		_imgui_mod_atlas_texture = std::make_unique<d3d9_tex_data>(obj);
+
+		return true;
+	}
+
+	bool d3d9_runtime::update_imgui_mod_atlas(int texidx)
+	{
+		if (!modTextureData)
+			return true;
+
+		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
+
+		int width, height, bits_per_pixel;
+		unsigned char *pixels;
+
+		ImGui::SetCurrentContext(_imgui_context);
+		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+
+		if (pixels == nullptr)
+			return true;
+
+		RECT rect;
+		if (modGetTextureDirtyRect(texidx, 0, &rect))
+		{
+			int rectidx = 0;
+			D3DLOCKED_RECT mod_atlas_rect;
+			auto texture = _imgui_mod_atlas_texture->as<d3d9_tex_data>();
+			assert(texture != null && texture->texture != null);
+
+			HRESULT hr = S_OK;
+			if (SUCCEEDED(texture->texture->LockRect(0, &mod_atlas_rect, nullptr, 0)))
+			{
+				if (mod_atlas_rect.pBits)
+				{
+					while (modGetTextureDirtyRect(texidx, rectidx++, &rect))
+					{
+						int bx = std::min<int>(rect.left, std::min<int>(rect.right, width - 1));
+						int by = std::min<int>(rect.top, std::min<int>(rect.bottom, height - 1));
+						int ex = std::max<int>(rect.left, std::min<int>(rect.right, width - 1));
+						int ey = std::max<int>(rect.top, std::min<int>(rect.bottom, height - 1));
+						for (int y = by; y <= ey; y++)
+						{
+							BYTE* mapped_data = static_cast<BYTE *>(mod_atlas_rect.pBits) + mod_atlas_rect.Pitch * y + bx *bits_per_pixel;
+							BYTE* data = pixels + (width * bits_per_pixel) * y + bx *bits_per_pixel;
+							const int size = (ex - bx + 1) * bits_per_pixel;
+							memcpy(mapped_data, data, size);
+						}
+					}
+				}
+				texture->texture->UnlockRect(0);
+			}
+		}
+
+		if (modGetTextureDirtyRect(texidx, 0, &rect))
+		{
+			D3DLOCKED_RECT mod_atlas_rect;
+			auto texture = _imgui_mod_atlas_texture->as<d3d9_tex_data>();
+			assert(texture != null && texture->texture != null);
+
+			if (FAILED(texture->texture->LockRect(0, &mod_atlas_rect, nullptr, 0)))
+			{
+				LOG(ERROR) << "Failed to update mod atlas texture";
+				return false;
+			}
+			for (int y = 0; y < height; y++)
+			{
+				BYTE* mapped_data = static_cast<BYTE *>(mod_atlas_rect.pBits) + mod_atlas_rect.Pitch * y;
+				BYTE* data = pixels + (width * bits_per_pixel) * y;
+				const int size = width * bits_per_pixel;
+				memcpy(mapped_data, data, (width * bits_per_pixel));
+				//for (UINT i = 0; i < size; i += 4, mapped_data += 4)
+				//	mapped_data[0] = data[i + 0],
+				//	mapped_data[1] = data[i + 1],
+				//	mapped_data[2] = data[i + 2],
+				//	mapped_data[3] = data[i + 3];
+			}
+
+			texture->texture->UnlockRect(0);
+		}
 
 		return true;
 	}
@@ -238,8 +318,8 @@ namespace reshade::d3d9
 		if (!init_backbuffer_texture() ||
 			!init_default_depth_stencil() ||
 			!init_fx_resources() ||
-			!init_imgui_mod_atlas() ||
-			!init_imgui_font_atlas())
+			!init_imgui_font_atlas() ||
+			!init_imgui_mod_atlases())
 		{
 			return false;
 		}

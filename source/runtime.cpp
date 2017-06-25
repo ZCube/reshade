@@ -88,12 +88,15 @@ namespace reshade
 		if (mod)
 		{
 			modInit = (TModInit)GetProcAddress(mod, "ModInit");
-			modRender = (TModInit)GetProcAddress(mod, "ModRender");
-			modUnInit = (TModInit)GetProcAddress(mod, "ModUnInit");
+			modRender = (TModRender)GetProcAddress(mod, "ModRender");
+			modUnInit = (TModUnInit)GetProcAddress(mod, "ModUnInit");
 			modTextureData = (TModTextureData)GetProcAddress(mod, "ModTextureData");
 			modSetTexture = (TModSetTexture)GetProcAddress(mod, "ModSetTexture");
-			modMenu = (TModMenu)GetProcAddress(mod, "ModMenu");
+			modGetTextureDirtyRect = (TModGetTextureDirtyRect)GetProcAddress(mod, "ModGetTextureDirtyRect");
+			modTextureBegin = (TModTextureBegin)GetProcAddress(mod, "ModTextureBegin");
+			modTextureEnd = (TModTextureEnd)GetProcAddress(mod, "ModTextureEnd");
 			modUpdateFont = (TModUpdateFont)GetProcAddress(mod, "ModUpdateFont");
+			modMenu = (TModMenu)GetProcAddress(mod, "ModMenu");
 		}
 		if (modInit)
 		{
@@ -157,7 +160,10 @@ namespace reshade
 		}
 
 		_imgui_font_atlas_texture.reset();
-		_imgui_mod_atlas_texture.reset();
+		for (auto& _imgui_mod_atlas_texture : _imgui_mod_atlas_textures)
+		{
+			_imgui_mod_atlas_texture.reset();
+		}
 
 		LOG(INFO) << "Destroyed runtime environment on runtime " << this << ".";
 
@@ -177,6 +183,29 @@ namespace reshade
 		_technique_count = 0;
 	}
 
+	bool runtime::init_imgui_mod_atlases()
+	{
+		bool ret = true;
+		if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
+		{
+			int textures = modTextureBegin();
+			if(_imgui_mod_atlas_textures.size()<textures) _imgui_mod_atlas_textures.resize(textures);
+
+			for (int texidx = 0; texidx < textures; ++texidx)
+			{
+				if (init_imgui_mod_atlas(texidx))
+				{
+					modSetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
+				}
+				else
+				{
+					ret = false;
+				}
+			}
+			modTextureEnd();
+		}
+		return ret;
+	}
 	void runtime::update_fonts()
 	{
 		/////////////////////////////////////////////////////////////////////////////////
@@ -187,6 +216,33 @@ namespace reshade
 				_imgui_font_atlas_texture.reset();
 				init_imgui_font_atlas();
 			}
+		}
+
+		if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
+		{
+			int textures = modTextureBegin();
+			if (_imgui_mod_atlas_textures.size()<textures) _imgui_mod_atlas_textures.resize(textures);
+
+			for (int texidx = 0; texidx < textures; ++texidx)
+			{
+				RECT rect;
+				if (_imgui_mod_atlas_textures[texidx])
+				{
+					update_imgui_mod_atlas(texidx);
+				}
+				else
+				{
+					init_imgui_mod_atlas(texidx);
+				}
+			}
+			//for (int texidx = 0; texidx < textures; ++texidx)
+			//{
+			//	if (!init_imgui_mod_atlas(texidx))
+			//	{
+			//		update_imgui_mod_atlas(texidx);
+			//	}
+			//}
+			modTextureEnd();
 		}
 		/////////////////////////////////////////////////////////////////////////////////
 	}
@@ -1072,12 +1128,12 @@ namespace reshade
 		imgui_io.DisplaySize.x = static_cast<float>(_width);
 		imgui_io.DisplaySize.y = static_cast<float>(_height);
 		imgui_io.Fonts->TexID = _imgui_font_atlas_texture.get();
-		/////////////////////////////////////////////////////////////////////////////////
-		if (modSetTexture)
-		{
-			modSetTexture(_imgui_mod_atlas_texture.get());
-		}
-		/////////////////////////////////////////////////////////////////////////////////
+		///////////////////////////////////////////////////////////////////////////////////
+		//if (modSetTexture)
+		//{
+		//	modSetTexture(texidx, _imgui_mod_atlas_texture.get());
+		//}
+		///////////////////////////////////////////////////////////////////////////////////
 		imgui_io.MouseDrawCursor = _show_menu;
 
 		imgui_io.KeyCtrl = _input->is_key_down(0x11); // VK_CONTROL

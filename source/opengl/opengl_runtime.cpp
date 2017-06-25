@@ -320,16 +320,45 @@ namespace reshade::opengl
 
 		return true;
 	}
-	bool opengl_runtime::init_imgui_mod_atlas()
+	bool opengl_runtime::init_imgui_mod_atlas(int texidx)
 	{
 		if (!modTextureData)
 			return true;
+
+		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
 
 		int width, height, bits_per_pixel;
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(&pixels, &width, &height, &bits_per_pixel);
+		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+
+		if (pixels == nullptr)
+			return true;
+
+		GLuint font_atlas_id = 0;
+
+		auto tex = _imgui_mod_atlas_texture->as<opengl_tex_data>();
+		glBindTexture(GL_TEXTURE_2D, tex->id[0]);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+
+		return true;
+	}
+
+	bool opengl_runtime::update_imgui_mod_atlas(int texidx)
+	{
+		if (!modTextureData)
+			return true;
+
+		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
+
+		int width, height, bits_per_pixel;
+		unsigned char *pixels;
+
+		ImGui::SetCurrentContext(_imgui_context);
+		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
@@ -364,8 +393,8 @@ namespace reshade::opengl
 			!init_default_depth_stencil() ||
 			!init_fx_resources() ||
 			!init_imgui_resources() ||
-			!init_imgui_mod_atlas() ||
-			!init_imgui_font_atlas())
+			!init_imgui_font_atlas() ||
+			!init_imgui_mod_atlases())
 		{
 			_stateblock.apply();
 

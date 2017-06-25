@@ -419,16 +419,18 @@ namespace reshade::d3d11
 
 		return true;
 	}
-	bool d3d11_runtime::init_imgui_mod_atlas()
+	bool d3d11_runtime::init_imgui_mod_atlas(int texidx)
 	{
 		if (!modTextureData)
 			return true;
+
+		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
 
 		int width, height, bits_per_pixel;
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(&pixels, &width, &height, &bits_per_pixel);
+		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
@@ -437,10 +439,11 @@ namespace reshade::d3d11
 			static_cast<UINT>(width),
 			static_cast<UINT>(height),
 			1, 1,
-			DXGI_FORMAT_R8G8B8A8_UNORM,
+			DXGI_FORMAT_B8G8R8A8_UNORM,
 			{ 1, 0 },
-			D3D11_USAGE_DEFAULT,
-			D3D11_BIND_SHADER_RESOURCE
+			D3D11_USAGE_DYNAMIC,
+			D3D11_BIND_SHADER_RESOURCE,
+			D3D11_CPU_ACCESS_WRITE
 		};
 		const D3D11_SUBRESOURCE_DATA tex_data = {
 			pixels,
@@ -473,6 +476,66 @@ namespace reshade::d3d11
 		return true;
 	}
 
+	bool d3d11_runtime::update_imgui_mod_atlas(int texidx)
+	{
+		if (!modTextureData)
+			return true;
+
+		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
+
+		if (!_imgui_mod_atlas_texture)
+		{
+			return false;
+		}
+
+		int width, height, bits_per_pixel;
+		unsigned char *pixels;
+
+		ImGui::SetCurrentContext(_imgui_context);
+		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+
+		if (pixels == nullptr)
+			return true;
+
+		RECT rect;
+		if (modGetTextureDirtyRect(texidx, 0, &rect))
+		{
+			ID3D11DeviceContext *devicecontext = nullptr;
+			_device->GetImmediateContext(&devicecontext);
+			int rectidx = 0;
+			if (devicecontext)
+			{
+				auto obj_data = _imgui_mod_atlas_texture->as<d3d11_tex_data>();
+				D3D11_MAPPED_SUBRESOURCE res = { 0, };
+				HRESULT hr = devicecontext->Map(obj_data->texture.get(), 0, D3D11_MAP_WRITE_DISCARD, 0, &res);
+				if (SUCCEEDED(hr))
+				{
+					if (res.pData)
+					{
+						//while (modGetTextureDirtyRect(texidx, rectidx++, &rect))
+						if (modGetTextureDirtyRect(texidx, -1, &rect))
+						{
+							int bx = std::min<int>(rect.left, std::min<int>(rect.right, width - 1));
+							int by = std::min<int>(rect.top, std::min<int>(rect.bottom, height - 1));
+							int ex = std::max<int>(rect.left, std::min<int>(rect.right, width - 1));
+							int ey = std::max<int>(rect.top, std::min<int>(rect.bottom, height - 1));
+							for (int y = by; y <= ey; y++)
+							{
+								BYTE* mapped_data = static_cast<BYTE *>(res.pData) + res.RowPitch * y + bx *bits_per_pixel;
+								BYTE* data = pixels + (width * bits_per_pixel) * y + bx *bits_per_pixel;
+								const int size = (ex - bx + 1) * bits_per_pixel;
+								memcpy(mapped_data, data, size);
+							}
+						}
+					}
+					devicecontext->Unmap(obj_data->texture.get(), 0);
+				}
+			}
+		}
+
+		return true;
+	}
+
 	bool d3d11_runtime::on_init(const DXGI_SWAP_CHAIN_DESC &desc)
 	{
 		_width = desc.BufferDesc.Width;
@@ -485,8 +548,8 @@ namespace reshade::d3d11
 			!init_default_depth_stencil() ||
 			!init_fx_resources() ||
 			!init_imgui_resources() ||
-			!init_imgui_mod_atlas() ||
-			!init_imgui_font_atlas())
+			!init_imgui_font_atlas() ||
+			!init_imgui_mod_atlases())
 		{
 			return false;
 		}
