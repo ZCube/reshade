@@ -147,7 +147,7 @@ namespace reshade
 		_last_reload_time = std::chrono::high_resolution_clock::now();
 
 		reload();
-
+		init_imgui_mod_atlases();
 		return true;
 	}
 	void runtime::on_reset()
@@ -160,11 +160,21 @@ namespace reshade
 		}
 
 		_imgui_font_atlas_texture.reset();
-		for (auto& _imgui_mod_atlas_texture : _imgui_mod_atlas_textures)
-		{
-			_imgui_mod_atlas_texture.reset();
-		}
+		//for (auto& _imgui_mod_atlas_texture : _imgui_mod_atlas_textures)
+		//{
+		//	_imgui_mod_atlas_texture.reset();
+		//}
+		_imgui_mod_atlas_textures.clear();
 
+		if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
+		{
+			int textures = modTextureBegin();
+			for (int texidx = 0; texidx < textures; ++texidx)
+			{
+				modSetTexture(texidx, nullptr);
+			}
+			modTextureEnd();
+		}
 		LOG(INFO) << "Destroyed runtime environment on runtime " << this << ".";
 
 		_width = _height = 0;
@@ -199,7 +209,7 @@ namespace reshade
 				}
 				else
 				{
-					ret = false;
+					modSetTexture(texidx, nullptr);
 				}
 			}
 			modTextureEnd();
@@ -232,7 +242,14 @@ namespace reshade
 				}
 				else
 				{
-					init_imgui_mod_atlas(texidx);
+					if (init_imgui_mod_atlas(texidx))
+					{
+						modSetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
+					}
+					else
+					{
+						modSetTexture(texidx, nullptr);
+					}
 				}
 			}
 			//for (int texidx = 0; texidx < textures; ++texidx)
