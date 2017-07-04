@@ -160,15 +160,11 @@ namespace reshade
 		}
 
 		_imgui_font_atlas_texture.reset();
-		//for (auto& _imgui_mod_atlas_texture : _imgui_mod_atlas_textures)
-		//{
-		//	_imgui_mod_atlas_texture.reset();
-		//}
-		_imgui_mod_atlas_textures.clear();
 
 		if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
 		{
 			int textures = modTextureBegin();
+			_imgui_mod_atlas_textures.clear();
 			for (int texidx = 0; texidx < textures; ++texidx)
 			{
 				modSetTexture(texidx, nullptr);
@@ -228,38 +224,44 @@ namespace reshade
 			}
 		}
 
-		if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
+		if (_show_mod)
 		{
-			int textures = modTextureBegin();
-			if (_imgui_mod_atlas_textures.size()<textures) _imgui_mod_atlas_textures.resize(textures);
-
-			for (int texidx = 0; texidx < textures; ++texidx)
+			if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
 			{
-				RECT rect;
-				if (_imgui_mod_atlas_textures[texidx])
+				int textures = modTextureBegin();
+				if (_imgui_mod_atlas_textures.size() < textures) _imgui_mod_atlas_textures.resize(textures);
+
+				for (int texidx = 0; texidx < textures; ++texidx)
 				{
-					update_imgui_mod_atlas(texidx);
-				}
-				else
-				{
-					if (init_imgui_mod_atlas(texidx))
+					RECT rect;
+					if (_imgui_mod_atlas_textures[texidx])
 					{
-						modSetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
+						if (!update_imgui_mod_atlas(texidx))
+						{
+							modSetTexture(texidx, nullptr);
+						}
 					}
 					else
 					{
-						modSetTexture(texidx, nullptr);
+						if (init_imgui_mod_atlas(texidx))
+						{
+							modSetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
+						}
+						else
+						{
+							modSetTexture(texidx, nullptr);
+						}
 					}
 				}
+				//for (int texidx = 0; texidx < textures; ++texidx)
+				//{
+				//	if (!init_imgui_mod_atlas(texidx))
+				//	{
+				//		update_imgui_mod_atlas(texidx);
+				//	}
+				//}
+				modTextureEnd();
 			}
-			//for (int texidx = 0; texidx < textures; ++texidx)
-			//{
-			//	if (!init_imgui_mod_atlas(texidx))
-			//	{
-			//		update_imgui_mod_atlas(texidx);
-			//	}
-			//}
-			modTextureEnd();
 		}
 		/////////////////////////////////////////////////////////////////////////////////
 	}
