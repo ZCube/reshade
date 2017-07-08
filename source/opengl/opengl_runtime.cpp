@@ -338,12 +338,16 @@ namespace reshade::opengl
 
 		GLuint font_atlas_id = 0;
 
-		auto tex = _imgui_mod_atlas_texture->as<opengl_tex_data>();
-		glBindTexture(GL_TEXTURE_2D, tex->id[0]);
+		glGenTextures(1, &font_atlas_id);
+		glBindTexture(GL_TEXTURE_2D, font_atlas_id);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
 
+		opengl_tex_data obj = {};
+		obj.id[0] = font_atlas_id;
+
+		_imgui_mod_atlas_texture = std::make_unique<opengl_tex_data>(obj);
 		return true;
 	}
 
@@ -363,18 +367,11 @@ namespace reshade::opengl
 		if (pixels == nullptr)
 			return true;
 
-		GLuint font_atlas_id = 0;
-
-		glGenTextures(1, &font_atlas_id);
-		glBindTexture(GL_TEXTURE_2D, font_atlas_id);
+		auto tex = _imgui_mod_atlas_texture->as<opengl_tex_data>();
+		glBindTexture(GL_TEXTURE_2D, tex->id[0]);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 		glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
-		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, pixels);
-
-		opengl_tex_data obj = {};
-		obj.id[0] = font_atlas_id;
-
-		_imgui_mod_atlas_texture = std::make_unique<opengl_tex_data>(obj);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA8, width, height, 0, GL_BGRA, GL_UNSIGNED_BYTE, pixels);
 
 		return true;
 	}
