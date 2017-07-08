@@ -246,7 +246,7 @@ namespace reshade::d3d9
 			int rectidx = 0;
 			D3DLOCKED_RECT mod_atlas_rect;
 			auto texture = _imgui_mod_atlas_texture->as<d3d9_tex_data>();
-			assert(texture != null && texture->texture != null);
+			assert(texture != nullptr && texture->texture != nullptr);
 
 			HRESULT hr = S_OK;
 			if (SUCCEEDED(texture->texture->LockRect(0, &mod_atlas_rect, nullptr, 0)))
@@ -276,7 +276,7 @@ namespace reshade::d3d9
 		{
 			D3DLOCKED_RECT mod_atlas_rect;
 			auto texture = _imgui_mod_atlas_texture->as<d3d9_tex_data>();
-			assert(texture != null && texture->texture != null);
+			assert(texture != nullptr && texture->texture != nullptr);
 
 			if (FAILED(texture->texture->LockRect(0, &mod_atlas_rect, nullptr, 0)))
 			{
