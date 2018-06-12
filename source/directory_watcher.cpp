@@ -4,8 +4,6 @@
  */
 
 #include "directory_watcher.hpp"
-#include "unicode.hpp"
-
 #include <Windows.h>
 
 namespace reshade::filesystem
@@ -14,11 +12,11 @@ namespace reshade::filesystem
 		_path(path),
 		_buffer(sizeof(FILE_NOTIFY_INFORMATION) + MAX_PATH * sizeof(WCHAR))
 	{
-		_file_handle = CreateFileW(utf8_to_utf16(path.string()).c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
+		_file_handle = CreateFileW(path.wstring().c_str(), FILE_LIST_DIRECTORY, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, nullptr, OPEN_EXISTING, FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED, nullptr);
 		_completion_handle = CreateIoCompletionPort(_file_handle, nullptr, reinterpret_cast<ULONG_PTR>(_file_handle), 1);
 
 		OVERLAPPED overlapped = { };
-		ReadDirectoryChangesW(_file_handle, _buffer.data(), _buffer.size(), TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE, nullptr, &overlapped, nullptr);
+		ReadDirectoryChangesW(_file_handle, _buffer.data(), static_cast<DWORD>(_buffer.size()), TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE, nullptr, &overlapped, nullptr);
 	}
 	directory_watcher::~directory_watcher()
 	{
@@ -40,14 +38,14 @@ namespace reshade::filesystem
 		}
 
 		static DWORD s_last_tick_count = 0;
-		static std::string s_last_filename;
+		static std::wstring s_last_filename;
 
 		auto record = reinterpret_cast<const FILE_NOTIFY_INFORMATION *>(_buffer.data());
 		const auto current_tick_count = GetTickCount();
 
 		while (true)
 		{
-			std::string filename = utf16_to_utf8(record->FileName, record->FileNameLength / sizeof(WCHAR));
+			const std::wstring filename(record->FileName, record->FileNameLength / sizeof(WCHAR));
 
 			if (filename != s_last_filename || s_last_tick_count + 2000 < current_tick_count)
 			{
@@ -67,7 +65,7 @@ namespace reshade::filesystem
 
 		overlapped->hEvent = nullptr;
 
-		ReadDirectoryChangesW(_file_handle, _buffer.data(), _buffer.size(), TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE, nullptr, overlapped, nullptr);
+		ReadDirectoryChangesW(_file_handle, _buffer.data(), static_cast<DWORD>(_buffer.size()), TRUE, FILE_NOTIFY_CHANGE_LAST_WRITE, nullptr, overlapped, nullptr);
 
 		return true;
 	}

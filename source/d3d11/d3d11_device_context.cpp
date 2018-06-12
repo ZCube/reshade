@@ -7,6 +7,133 @@
 #include "d3d11_device.hpp"
 #include "d3d11_device_context.hpp"
 
+void D3D11DeviceContext::log_drawcall(UINT vertices)
+{
+	_draw_call_tracker.log_drawcalls(1, vertices);
+
+	if (_active_depthstencil != nullptr)
+	{
+		_draw_call_tracker.log_drawcalls(_active_depthstencil.get(), 1, vertices);
+	}
+}
+void D3D11DeviceContext::clear_drawcall_stats()
+{
+	_draw_call_tracker.reset();
+	_active_depthstencil.reset();
+}
+
+static inline com_ptr<ID3D11Texture2D> copy_texture(D3D11DeviceContext *devicecontext, D3D11_TEXTURE2D_DESC &texture_desc, ID3D11Texture2D *depth_texture)
+{
+	com_ptr<ID3D11Texture2D> depth_texture_copy;
+
+	switch (texture_desc.Format)
+	{
+		case DXGI_FORMAT_R16_TYPELESS:
+		case DXGI_FORMAT_D16_UNORM:
+			texture_desc.Format = DXGI_FORMAT_R16_TYPELESS;
+			break;
+		case DXGI_FORMAT_R32_TYPELESS:
+		case DXGI_FORMAT_D32_FLOAT:
+			texture_desc.Format = DXGI_FORMAT_R32_TYPELESS;
+			break;
+		default:
+		case DXGI_FORMAT_R24G8_TYPELESS:
+		case DXGI_FORMAT_D24_UNORM_S8_UINT:
+			texture_desc.Format = DXGI_FORMAT_R24G8_TYPELESS;
+			break;
+		case DXGI_FORMAT_R32G8X24_TYPELESS:
+		case DXGI_FORMAT_D32_FLOAT_S8X24_UINT:
+			texture_desc.Format = DXGI_FORMAT_R32G8X24_TYPELESS;
+			break;
+	}
+
+	texture_desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+
+	// TODO: Avoid texture creation every frame
+	HRESULT hr = devicecontext->_device->CreateTexture2D(&texture_desc, nullptr, &depth_texture_copy);
+
+	if (FAILED(hr))
+	{
+		LOG(ERROR) << "Failed to create depth texture copy! HRESULT is '" << std::hex << hr << std::dec << "'.";
+		return nullptr;
+	}
+
+	devicecontext->CopyResource(depth_texture_copy.get(), depth_texture);
+
+	return depth_texture_copy;
+}
+
+void D3D11DeviceContext::track_active_depthstencil(ID3D11DepthStencilView *pDepthStencilView)
+{
+	if (pDepthStencilView == _active_depthstencil)
+	{
+		return;
+	}
+
+	_active_depthstencil = pDepthStencilView;
+
+	if (_device->_runtimes.empty())
+	{
+		return;
+	}
+
+	const auto runtime = _device->_runtimes.front();
+
+	if (pDepthStencilView != nullptr && !runtime->depth_buffer_before_clear())
+	{
+		_draw_call_tracker.track_depthstencil(pDepthStencilView);
+	}
+}
+void D3D11DeviceContext::track_cleared_depthstencil(ID3D11DepthStencilView *pDepthStencilView)
+{
+	if (_device->_runtimes.empty())
+	{
+		return;
+	}
+
+	const auto runtime = _device->_runtimes.front();
+
+	if (!runtime->depth_buffer_before_clear())
+	{
+		return;
+	}
+
+	assert(pDepthStencilView != nullptr);
+
+	// Retrieve texture from depth stencil
+	com_ptr<ID3D11Resource> resource;
+	pDepthStencilView->GetResource(&resource);
+
+	com_ptr<ID3D11Texture2D> texture;
+	if (FAILED(resource->QueryInterface(&texture)))
+	{
+		return;
+	}
+
+	D3D11_TEXTURE2D_DESC desc;
+	texture->GetDesc(&desc);
+
+	// Check if aspect ratio is similar to the back buffer one
+	const float screen_aspect_ratio = float(runtime->frame_width()) / float(runtime->frame_height());
+	const float texture_aspect_ratio = float(desc.Width) / float(desc.Height);
+
+	if (fabs(texture_aspect_ratio - screen_aspect_ratio) > 0.1f)
+	{
+		return;
+	}
+
+	// Ignore depth stencils that were not used much during rendering or are tracked already
+	const UINT VERTICES_THRESHOLD = 10000;
+
+	if (_draw_call_tracker.vertices() < VERTICES_THRESHOLD || _draw_call_tracker.check_depthstencil(pDepthStencilView))
+	{
+		return;
+	}
+
+	// Copy the depth stencil texture and track the associated depth stencil
+	_draw_call_tracker.track_depthstencil(pDepthStencilView, copy_texture(this, desc, texture.get()));
+}
+
 // ID3D11DeviceContext
 HRESULT STDMETHODCALLTYPE D3D11DeviceContext::QueryInterface(REFIID riid, void **ppvObj)
 {
@@ -23,7 +150,7 @@ HRESULT STDMETHODCALLTYPE D3D11DeviceContext::QueryInterface(REFIID riid, void *
 		riid == __uuidof(ID3D11DeviceContext2) ||
 		riid == __uuidof(ID3D11DeviceContext3))
 	{
-#pragma region Update to ID3D11DeviceContext1 interface
+		#pragma region Update to ID3D11DeviceContext1 interface
 		if (riid == __uuidof(ID3D11DeviceContext1) && _interface_version < 1)
 		{
 			ID3D11DeviceContext1 *devicecontext1 = nullptr;
@@ -40,8 +167,8 @@ HRESULT STDMETHODCALLTYPE D3D11DeviceContext::QueryInterface(REFIID riid, void *
 			_orig = devicecontext1;
 			_interface_version = 1;
 		}
-#pragma endregion
-#pragma region Update to ID3D11DeviceContext2 interface
+		#pragma endregion
+		#pragma region Update to ID3D11DeviceContext2 interface
 		if (riid == __uuidof(ID3D11DeviceContext2) && _interface_version < 2)
 		{
 			ID3D11DeviceContext2 *devicecontext2 = nullptr;
@@ -58,8 +185,8 @@ HRESULT STDMETHODCALLTYPE D3D11DeviceContext::QueryInterface(REFIID riid, void *
 			_orig = devicecontext2;
 			_interface_version = 2;
 		}
-#pragma endregion
-#pragma region Update to ID3D11DeviceContext3 interface
+		#pragma endregion
+		#pragma region Update to ID3D11DeviceContext3 interface
 		if (riid == __uuidof(ID3D11DeviceContext3) && _interface_version < 3)
 		{
 			ID3D11DeviceContext3 *devicecontext3 = nullptr;
@@ -76,7 +203,7 @@ HRESULT STDMETHODCALLTYPE D3D11DeviceContext::QueryInterface(REFIID riid, void *
 			_orig = devicecontext3;
 			_interface_version = 3;
 		}
-#pragma endregion
+		#pragma endregion
 
 		AddRef();
 
@@ -160,21 +287,13 @@ void STDMETHODCALLTYPE D3D11DeviceContext::VSSetShader(ID3D11VertexShader *pVert
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::DrawIndexed(UINT IndexCount, UINT StartIndexLocation, INT BaseVertexLocation)
 {
-	for (auto runtime : _device->_runtimes)
-	{
-		runtime->on_draw_call(_orig, IndexCount);
-	}
-
 	_orig->DrawIndexed(IndexCount, StartIndexLocation, BaseVertexLocation);
+	log_drawcall(IndexCount);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::Draw(UINT VertexCount, UINT StartVertexLocation)
 {
-	for (auto runtime : _device->_runtimes)
-	{
-		runtime->on_draw_call(_orig, VertexCount);
-	}
-
 	_orig->Draw(VertexCount, StartVertexLocation);
+	log_drawcall(VertexCount);
 }
 HRESULT STDMETHODCALLTYPE D3D11DeviceContext::Map(ID3D11Resource *pResource, UINT Subresource, D3D11_MAP MapType, UINT MapFlags, D3D11_MAPPED_SUBRESOURCE *pMappedResource)
 {
@@ -202,21 +321,13 @@ void STDMETHODCALLTYPE D3D11DeviceContext::IASetIndexBuffer(ID3D11Buffer *pIndex
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::DrawIndexedInstanced(UINT IndexCountPerInstance, UINT InstanceCount, UINT StartIndexLocation, INT BaseVertexLocation, UINT StartInstanceLocation)
 {
-	for (auto runtime : _device->_runtimes)
-	{
-		runtime->on_draw_call(_orig, IndexCountPerInstance * InstanceCount);
-	}
-
 	_orig->DrawIndexedInstanced(IndexCountPerInstance, InstanceCount, StartIndexLocation, BaseVertexLocation, StartInstanceLocation);
+	log_drawcall(IndexCountPerInstance * InstanceCount);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::DrawInstanced(UINT VertexCountPerInstance, UINT InstanceCount, UINT StartVertexLocation, UINT StartInstanceLocation)
 {
-	for (auto runtime : _device->_runtimes)
-	{
-		runtime->on_draw_call(_orig, VertexCountPerInstance * InstanceCount);
-	}
-
 	_orig->DrawInstanced(VertexCountPerInstance, InstanceCount, StartVertexLocation, StartInstanceLocation);
+	log_drawcall(VertexCountPerInstance * InstanceCount);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::GSSetConstantBuffers(UINT StartSlot, UINT NumBuffers, ID3D11Buffer *const *ppConstantBuffers)
 {
@@ -264,25 +375,13 @@ void STDMETHODCALLTYPE D3D11DeviceContext::GSSetSamplers(UINT StartSlot, UINT Nu
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::OMSetRenderTargets(UINT NumViews, ID3D11RenderTargetView *const *ppRenderTargetViews, ID3D11DepthStencilView *pDepthStencilView)
 {
-	if (pDepthStencilView != nullptr)
-	{
-		for (auto runtime : _device->_runtimes)
-		{
-			runtime->on_set_depthstencil_view(pDepthStencilView);
-		}
-	}
+	track_active_depthstencil(pDepthStencilView);
 
 	_orig->OMSetRenderTargets(NumViews, ppRenderTargetViews, pDepthStencilView);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::OMSetRenderTargetsAndUnorderedAccessViews(UINT NumRTVs, ID3D11RenderTargetView *const *ppRenderTargetViews, ID3D11DepthStencilView *pDepthStencilView, UINT UAVStartSlot, UINT NumUAVs, ID3D11UnorderedAccessView *const *ppUnorderedAccessViews, const UINT *pUAVInitialCounts)
 {
-	if (pDepthStencilView != nullptr)
-	{
-		for (auto runtime : _device->_runtimes)
-		{
-			runtime->on_set_depthstencil_view(pDepthStencilView);
-		}
-	}
+	track_active_depthstencil(pDepthStencilView);
 
 	_orig->OMSetRenderTargetsAndUnorderedAccessViews(NumRTVs, ppRenderTargetViews, pDepthStencilView, UAVStartSlot, NumUAVs, ppUnorderedAccessViews, pUAVInitialCounts);
 }
@@ -301,14 +400,17 @@ void STDMETHODCALLTYPE D3D11DeviceContext::SOSetTargets(UINT NumBuffers, ID3D11B
 void STDMETHODCALLTYPE D3D11DeviceContext::DrawAuto()
 {
 	_orig->DrawAuto();
+	log_drawcall(0);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::DrawIndexedInstancedIndirect(ID3D11Buffer *pBufferForArgs, UINT AlignedByteOffsetForArgs)
 {
 	_orig->DrawIndexedInstancedIndirect(pBufferForArgs, AlignedByteOffsetForArgs);
+	log_drawcall(0);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::DrawInstancedIndirect(ID3D11Buffer *pBufferForArgs, UINT AlignedByteOffsetForArgs)
 {
 	_orig->DrawInstancedIndirect(pBufferForArgs, AlignedByteOffsetForArgs);
+	log_drawcall(0);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::Dispatch(UINT ThreadGroupCountX, UINT ThreadGroupCountY, UINT ThreadGroupCountZ)
 {
@@ -336,11 +438,6 @@ void STDMETHODCALLTYPE D3D11DeviceContext::CopySubresourceRegion(ID3D11Resource 
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::CopyResource(ID3D11Resource *pDstResource, ID3D11Resource *pSrcResource)
 {
-	for (auto runtime : _device->_runtimes)
-	{
-		runtime->on_copy_resource(pDstResource, pSrcResource);
-	}
-
 	_orig->CopyResource(pDstResource, pSrcResource);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::UpdateSubresource(ID3D11Resource *pDstResource, UINT DstSubresource, const D3D11_BOX *pDstBox, const void *pSrcData, UINT SrcRowPitch, UINT SrcDepthPitch)
@@ -365,10 +462,7 @@ void STDMETHODCALLTYPE D3D11DeviceContext::ClearUnorderedAccessViewFloat(ID3D11U
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::ClearDepthStencilView(ID3D11DepthStencilView *pDepthStencilView, UINT ClearFlags, FLOAT Depth, UINT8 Stencil)
 {
-	for (auto runtime : _device->_runtimes)
-	{
-		runtime->on_clear_depthstencil_view(pDepthStencilView);
-	}
+	track_cleared_depthstencil(pDepthStencilView);
 
 	_orig->ClearDepthStencilView(pDepthStencilView, ClearFlags, Depth, Stencil);
 }
@@ -390,6 +484,11 @@ void STDMETHODCALLTYPE D3D11DeviceContext::ResolveSubresource(ID3D11Resource *pD
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::ExecuteCommandList(ID3D11CommandList *pCommandList, BOOL RestoreContextState)
 {
+	if (pCommandList != nullptr)
+	{
+		_device->merge_commandlist_trackers(pCommandList, _draw_call_tracker);
+	}
+
 	_orig->ExecuteCommandList(pCommandList, RestoreContextState);
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::HSSetShaderResources(UINT StartSlot, UINT NumViews, ID3D11ShaderResourceView *const *ppShaderResourceViews)
@@ -515,26 +614,10 @@ void STDMETHODCALLTYPE D3D11DeviceContext::GSGetSamplers(UINT StartSlot, UINT Nu
 void STDMETHODCALLTYPE D3D11DeviceContext::OMGetRenderTargets(UINT NumViews, ID3D11RenderTargetView **ppRenderTargetViews, ID3D11DepthStencilView **ppDepthStencilView)
 {
 	_orig->OMGetRenderTargets(NumViews, ppRenderTargetViews, ppDepthStencilView);
-
-	if (ppDepthStencilView != nullptr)
-	{
-		for (auto runtime : _device->_runtimes)
-		{
-			runtime->on_get_depthstencil_view(*ppDepthStencilView);
-		}
-	}
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::OMGetRenderTargetsAndUnorderedAccessViews(UINT NumRTVs, ID3D11RenderTargetView **ppRenderTargetViews, ID3D11DepthStencilView **ppDepthStencilView, UINT UAVStartSlot, UINT NumUAVs, ID3D11UnorderedAccessView **ppUnorderedAccessViews)
 {
 	_orig->OMGetRenderTargetsAndUnorderedAccessViews(NumRTVs, ppRenderTargetViews, ppDepthStencilView, UAVStartSlot, NumUAVs, ppUnorderedAccessViews);
-
-	if (ppDepthStencilView != nullptr)
-	{
-		for (auto runtime : _device->_runtimes)
-		{
-			runtime->on_get_depthstencil_view(*ppDepthStencilView);
-		}
-	}
 }
 void STDMETHODCALLTYPE D3D11DeviceContext::OMGetBlendState(ID3D11BlendState **ppBlendState, FLOAT BlendFactor[4], UINT *pSampleMask)
 {
@@ -626,7 +709,17 @@ UINT STDMETHODCALLTYPE D3D11DeviceContext::GetContextFlags()
 }
 HRESULT STDMETHODCALLTYPE D3D11DeviceContext::FinishCommandList(BOOL RestoreDeferredContextState, ID3D11CommandList **ppCommandList)
 {
-	return _orig->FinishCommandList(RestoreDeferredContextState, ppCommandList);
+	const HRESULT hr = _orig->FinishCommandList(RestoreDeferredContextState, ppCommandList);
+
+	if (SUCCEEDED(hr) && ppCommandList != nullptr && _draw_call_tracker.drawcalls() > 0)
+	{
+		_device->add_commandlist_trackers(*ppCommandList, _draw_call_tracker);
+	}
+
+	_draw_call_tracker.reset();
+	_active_depthstencil.reset();
+
+	return hr;
 }
 D3D11_DEVICE_CONTEXT_TYPE STDMETHODCALLTYPE D3D11DeviceContext::GetType()
 {

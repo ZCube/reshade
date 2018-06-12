@@ -5,9 +5,11 @@
 
 #include "log.hpp"
 #include "input.hpp"
-#include <Windows.h>
+#include "hook_manager.hpp"
 #include <assert.h>
+#include <Windows.h>
 #include <mutex>
+#include <algorithm>
 #include <unordered_map>
 
 namespace reshade
@@ -35,13 +37,6 @@ namespace reshade
 	}
 	std::shared_ptr<input> input::register_window(window_handle window)
 	{
-		const HWND parent = GetParent(static_cast<HWND>(window));
-
-		if (parent != nullptr)
-		{
-			window = parent;
-		}
-
 		const std::lock_guard<std::mutex> lock(s_mutex);
 
 		const auto insert = s_windows.emplace(static_cast<HWND>(window), std::weak_ptr<input>());
@@ -76,44 +71,51 @@ namespace reshade
 		bool is_mouse_message = details.message >= WM_MOUSEFIRST && details.message <= WM_MOUSELAST;
 		bool is_keyboard_message = details.message >= WM_KEYFIRST && details.message <= WM_KEYLAST;
 
+		// Ignore messages that are not related to mouse or keyboard input
 		if (details.message != WM_INPUT && !is_mouse_message && !is_keyboard_message)
 		{
 			return false;
 		}
 
-		const HWND parent = GetParent(details.hwnd);
-
-		if (parent != nullptr)
-		{
-			details.hwnd = parent;
-		}
-
 		const std::lock_guard<std::mutex> lock(s_mutex);
 
+		// Remove any expired entry from the list
+		for (auto it = s_windows.begin(); it != s_windows.end();)
+			it->second.expired() ? it = s_windows.erase(it) : ++it;
+
+		// Look up the window in the list of known input windows
 		auto input_window = s_windows.find(details.hwnd);
 		const auto raw_input_window = s_raw_input_windows.find(details.hwnd);
 
+		if (input_window == s_windows.end())
+		{
+			// Walk through the window chain and until an known window is found
+			EnumChildWindows(details.hwnd, [](HWND hwnd, LPARAM lparam) -> BOOL {
+				auto &input_window = *reinterpret_cast<decltype(s_windows)::iterator *>(lparam);
+				// Return true to continue enumeration
+				return (input_window = s_windows.find(hwnd)) == s_windows.end();
+			}, reinterpret_cast<LPARAM>(&input_window));
+		}
+
 		if (input_window == s_windows.end() && raw_input_window != s_raw_input_windows.end())
 		{
-			// This is a raw input message. Just reroute it to the first window for now, since it is rare to have more than one active at a time.
-			input_window = s_windows.begin();
+			// Reroute this raw input message to the window with the most rendering
+			input_window = std::max_element(s_windows.begin(), s_windows.end(),
+				[](auto lhs, auto rhs) { return lhs.second.lock()->_frame_count < rhs.second.lock()->_frame_count; });
 		}
 
 		if (input_window == s_windows.end())
 		{
 			return false;
 		}
-		else if (input_window->second.expired())
-		{
-			s_windows.erase(input_window);
-			return false;
-		}
 
-		RAWINPUT raw_data = { };
+		RAWINPUT raw_data = {};
 		UINT raw_data_size = sizeof(raw_data);
+
 		const auto input_lock = input_window->second.lock();
 		input &input = *input_lock;
 
+		// Calculate window client mouse position
 		ScreenToClient(static_cast<HWND>(input._window), &details.pt);
 
 		input._mouse_position[0] = details.pt.x;
@@ -360,8 +362,27 @@ namespace reshade
 		_block_keyboard = enable;
 	}
 
+	static inline bool is_blocking_mouse_input()
+	{
+		const auto predicate = [](auto input_window) {
+			return !input_window.second.expired() && input_window.second.lock()->is_blocking_mouse_input();
+		};
+
+		return std::any_of(reshade::s_windows.cbegin(), reshade::s_windows.cend(), predicate);
+	}
+	static inline bool is_blocking_keyboard_input()
+	{
+		const auto predicate = [](auto input_window) {
+			return !input_window.second.expired() && input_window.second.lock()->is_blocking_keyboard_input();
+		};
+
+		return std::any_of(reshade::s_windows.cbegin(), reshade::s_windows.cend(), predicate);
+	}
+
 	void input::next_frame()
 	{
+		_frame_count++;
+
 		for (auto &state : _keys)
 		{
 			state &= ~0x8;
@@ -372,6 +393,8 @@ namespace reshade
 		}
 
 		_mouse_wheel_delta = 0;
+		_last_mouse_position[0] = _mouse_position[0];
+		_last_mouse_position[1] = _mouse_position[1];
 
 		// Update caps lock state
 		_keys[VK_CAPITAL] |= GetKeyState(VK_CAPITAL) & 0x1;
@@ -390,4 +413,172 @@ namespace reshade
 			_keys[VK_SNAPSHOT] = 0x88;
 		}
 	}
+}
+
+HOOK_EXPORT BOOL WINAPI HookGetMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
+{
+	static const auto trampoline = reshade::hooks::call(&HookGetMessageA);
+
+	if (!trampoline(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax))
+	{
+		return FALSE;
+	}
+
+	assert(lpMsg != nullptr);
+
+	if (lpMsg->hwnd != nullptr && reshade::input::handle_window_message(lpMsg))
+	{
+		// Change message so it is ignored by the recipient window
+		lpMsg->message = WM_NULL;
+	}
+
+	return TRUE;
+}
+HOOK_EXPORT BOOL WINAPI HookGetMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax)
+{
+	static const auto trampoline = reshade::hooks::call(&HookGetMessageW);
+
+	if (!trampoline(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax))
+	{
+		return FALSE;
+	}
+
+	assert(lpMsg != nullptr);
+
+	if (lpMsg->hwnd != nullptr && reshade::input::handle_window_message(lpMsg))
+	{
+		// Change message so it is ignored by the recipient window
+		lpMsg->message = WM_NULL;
+	}
+
+	return TRUE;
+}
+HOOK_EXPORT BOOL WINAPI HookPeekMessageA(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
+{
+	static const auto trampoline = reshade::hooks::call(&HookPeekMessageA);
+
+	if (!trampoline(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg))
+	{
+		return FALSE;
+	}
+
+	assert(lpMsg != nullptr);
+
+	if (lpMsg->hwnd != nullptr && (wRemoveMsg & PM_REMOVE) != 0 && reshade::input::handle_window_message(lpMsg))
+	{
+		// Change message so it is ignored by the recipient window
+		lpMsg->message = WM_NULL;
+	}
+
+	return TRUE;
+}
+HOOK_EXPORT BOOL WINAPI HookPeekMessageW(LPMSG lpMsg, HWND hWnd, UINT wMsgFilterMin, UINT wMsgFilterMax, UINT wRemoveMsg)
+{
+	static const auto trampoline = reshade::hooks::call(&HookPeekMessageW);
+
+	if (!trampoline(lpMsg, hWnd, wMsgFilterMin, wMsgFilterMax, wRemoveMsg))
+	{
+		return FALSE;
+	}
+
+	assert(lpMsg != nullptr);
+
+	if (lpMsg->hwnd != nullptr && (wRemoveMsg & PM_REMOVE) != 0 && reshade::input::handle_window_message(lpMsg))
+	{
+		// Change message so it is ignored by the recipient window
+		lpMsg->message = WM_NULL;
+	}
+
+	return TRUE;
+}
+
+HOOK_EXPORT BOOL WINAPI HookRegisterRawInputDevices(PCRAWINPUTDEVICE pRawInputDevices, UINT uiNumDevices, UINT cbSize)
+{
+	LOG(INFO) << "Redirecting '" << "RegisterRawInputDevices" << "(" << pRawInputDevices << ", " << uiNumDevices << ", " << cbSize << ")' ...";
+
+	for (UINT i = 0; i < uiNumDevices; ++i)
+	{
+		const auto &device = pRawInputDevices[i];
+
+		LOG(INFO) << "> Dumping device registration at index " << i << ":";
+		LOG(INFO) << "  +-----------------------------------------+-----------------------------------------+";
+		LOG(INFO) << "  | Parameter                               | Value                                   |";
+		LOG(INFO) << "  +-----------------------------------------+-----------------------------------------+";
+		LOG(INFO) << "  | UsagePage                               | " << std::setw(39) << std::hex << device.usUsagePage << std::dec << " |";
+		LOG(INFO) << "  | Usage                                   | " << std::setw(39) << std::hex << device.usUsage << std::dec << " |";
+		LOG(INFO) << "  | Flags                                   | " << std::setw(39) << std::hex << device.dwFlags << std::dec << " |";
+		LOG(INFO) << "  | TargetWindow                            | " << std::setw(39) << device.hwndTarget << " |";
+		LOG(INFO) << "  +-----------------------------------------+-----------------------------------------+";
+
+		if (device.usUsagePage != 1 || device.hwndTarget == nullptr)
+		{
+			continue;
+		}
+
+		reshade::input::register_window_with_raw_input(device.hwndTarget, device.usUsage == 0x06 && (device.dwFlags & RIDEV_NOLEGACY) != 0, device.usUsage == 0x02 && (device.dwFlags & RIDEV_NOLEGACY) != 0);
+	}
+
+	if (!reshade::hooks::call(&HookRegisterRawInputDevices)(pRawInputDevices, uiNumDevices, cbSize))
+	{
+		LOG(WARNING) << "> 'RegisterRawInputDevices' failed with error code " << GetLastError() << "!";
+
+		return FALSE;
+	}
+
+	return TRUE;
+}
+
+HOOK_EXPORT BOOL WINAPI HookPostMessageA(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
+{
+	if (reshade::is_blocking_mouse_input() && Msg == WM_MOUSEMOVE)
+	{
+		return TRUE;
+	}
+
+	static const auto trampoline = reshade::hooks::call(&HookPostMessageA);
+
+	return trampoline(hWnd, Msg, wParam, lParam);
+}
+HOOK_EXPORT BOOL WINAPI HookPostMessageW(HWND hWnd, UINT Msg, WPARAM wParam, LPARAM lParam)
+{
+	if (reshade::is_blocking_mouse_input() && Msg == WM_MOUSEMOVE)
+	{
+		return TRUE;
+	}
+
+	static const auto trampoline = reshade::hooks::call(&HookPostMessageW);
+
+	return trampoline(hWnd, Msg, wParam, lParam);
+}
+
+POINT last_cursor_position = { };
+
+HOOK_EXPORT BOOL WINAPI HookSetCursorPosition(int X, int Y)
+{
+	if (reshade::is_blocking_mouse_input())
+	{
+		last_cursor_position.x = X;
+		last_cursor_position.y = Y;
+
+		return TRUE;
+	}
+
+	static const auto trampoline = reshade::hooks::call(&HookSetCursorPosition);
+
+	return trampoline(X, Y);
+}
+HOOK_EXPORT BOOL WINAPI HookGetCursorPosition(LPPOINT lpPoint)
+{
+	if (reshade::is_blocking_mouse_input())
+	{
+		assert(lpPoint != nullptr);
+
+		*lpPoint = last_cursor_position;
+
+		return TRUE;
+	}
+
+	static const auto trampoline = reshade::hooks::call(&HookGetCursorPosition);
+
+	return trampoline(lpPoint);
 }

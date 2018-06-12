@@ -6,7 +6,9 @@
 #pragma once
 
 #include <chrono>
+#include <functional>
 #include "filesystem.hpp"
+#include "ini_file.hpp"
 #include "runtime_objects.hpp"
 
 /////////////////////////////////////////////////////////////////////////////////
@@ -48,7 +50,7 @@ namespace reshade
 		/// Construct a new runtime instance.
 		/// </summary>
 		/// <param name="renderer">A unique number identifying the renderer implementation.</param>
-		explicit runtime(uint32_t renderer);
+		runtime(uint32_t renderer);
 		virtual ~runtime();
 
 		/// <summary>
@@ -92,8 +94,8 @@ namespace reshade
 		/// <summary>
 		/// Find the texture with the specified name.
 		/// </summary>
-		/// <param name="name">The name of the texture.</param>
-		texture *find_texture(const std::string &name);
+		/// <param name="unique_name">The name of the texture.</param>
+		texture *find_texture(const std::string &unique_name);
 
 		/// <summary>
 		/// Return a reference to the internal uniform storage buffer.
@@ -121,6 +123,38 @@ namespace reshade
 		void set_uniform_value(uniform &variable, const int *values, size_t count);
 		void set_uniform_value(uniform &variable, const unsigned int *values, size_t count);
 		void set_uniform_value(uniform &variable, const float *values, size_t count);
+
+		/// <summary>
+		/// Register a function to be called when the menu is drawn.
+		/// </summary>
+		/// <param name="label">Name of the tab in the menu bar.</param>
+		/// <param name="function">The callback function.</param>
+		void subscribe_to_menu(std::string label, std::function<void()> function)
+		{
+			_menu_callables.push_back({ label, function });
+		}
+		/// <summary>
+		/// Register a function to be called when user configuration is loaded.
+		/// </summary>
+		/// <param name="function">The callback function.</param>
+		void subscribe_to_load_config(std::function<void(const ini_file &)> function)
+		{
+			_load_config_callables.push_back(function);
+
+			const ini_file config(_configuration_path);
+			function(config);
+		}
+		/// <summary>
+		/// Register a function to be called when user configuration is stored.
+		/// </summary>
+		/// <param name="function">The callback function.</param>
+		void subscribe_to_save_config(std::function<void(ini_file &)> function)
+		{
+			_save_config_callables.push_back(function);
+
+			ini_file config(_configuration_path);
+			function(config);
+		}
 
 	protected:
 		/// <summary>
@@ -170,6 +204,15 @@ namespace reshade
 		virtual bool update_texture(texture &texture, const uint8_t *data) = 0;
 
 		/// <summary>
+		/// Load user configuration from disk.
+		/// </summary>
+		void load_config();
+		/// <summary>
+		/// Save user configuration to disk.
+		/// </summary>
+		void save_config() const;
+
+		/// <summary>
 		/// Render all passes in a technique.
 		/// </summary>
 		/// <param name="technique">The technique to render.</param>
@@ -186,7 +229,6 @@ namespace reshade
 		unsigned int _drawcalls = 0, _vertices = 0;
 		std::shared_ptr<input> _input;
 		ImGuiContext *_imgui_context = nullptr;
-		std::unique_ptr<ImFontAtlas> _imgui_font_atlas;
 		std::unique_ptr<base_object> _imgui_font_atlas_texture;
 		std::vector<texture> _textures;
 		std::vector<uniform> _uniforms;
@@ -224,13 +266,13 @@ namespace reshade
 	public:
 		void update_fonts();
 	private:
-		struct key_shortcut { int keycode; bool ctrl, shift; };
+		static bool check_for_update(unsigned long latest_version[3]);
 
 		void reload();
-		void load_configuration();
-		void save_configuration() const;
 		void load_preset(const filesystem::path &path);
+		void load_current_preset();
 		void save_preset(const filesystem::path &path) const;
+		void save_current_preset() const;
 		void save_screenshot() const;
 
 		void draw_overlay();
@@ -238,6 +280,7 @@ namespace reshade
 		void draw_overlay_menu_home();
 		void draw_overlay_menu_settings();
 		void draw_overlay_menu_statistics();
+		void draw_overlay_menu_log();
 		void draw_overlay_menu_about();
 		void draw_overlay_variable_editor();
 		void draw_overlay_technique_editor();
@@ -246,25 +289,60 @@ namespace reshade
 
 		const unsigned int _renderer_id;
 		bool _is_initialized = false;
-		std::vector<filesystem::path> _effect_files, _preset_files, _effect_search_paths, _texture_search_paths;
-		std::chrono::high_resolution_clock::time_point _start_time, _last_reload_time, _last_present_time;
+		std::vector<filesystem::path> _effect_files;
+		std::vector<filesystem::path> _preset_files;
+		std::vector<filesystem::path> _effect_search_paths;
+		std::vector<filesystem::path> _texture_search_paths;
+		std::chrono::high_resolution_clock::time_point _start_time;
+		std::chrono::high_resolution_clock::time_point _last_reload_time;
+		std::chrono::high_resolution_clock::time_point _last_present_time;
 		std::chrono::high_resolution_clock::duration _last_frame_duration;
 		std::vector<unsigned char> _uniform_data_storage;
 		int _date[4] = { };
-		std::string _errors;
 		std::vector<std::string> _preprocessor_definitions;
-		int _menu_index = 0, _screenshot_format = 0, _current_preset = -1, _selected_technique = -1, _input_processing_mode = 2;
-		key_shortcut _menu_key, _screenshot_key, _effects_key, _mod_key, _mod_menu_key;
-		filesystem::path _configuration_path, _screenshot_path, _imgui_configuration_path;
-		bool _show_menu = false, _show_error_log = false, _performance_mode = false, _effects_enabled = true;
-		bool _show_clock = false, _show_framerate = false;
+		std::vector<std::pair<std::string, std::function<void()>>> _menu_callables;
+		std::vector<std::function<void(const ini_file &)>> _load_config_callables;
+		std::vector<std::function<void(ini_file &)>> _save_config_callables;
+		size_t _menu_index = 0;
+		int _screenshot_format = 0;
+		int _current_preset = -1;
+		int _selected_technique = -1;
+		int _input_processing_mode = 2;
+		unsigned int _menu_key_data[3];
+		unsigned int _screenshot_key_data[3];
+		unsigned int _effects_key_data[3];
+		unsigned int _mod_key_data[3];
+		unsigned int _mod_menu_key_data[3];
+		filesystem::path _configuration_path, _screenshot_path, _imgui_configuration_path;;
+		std::string _focus_effect;
+		bool _needs_update = false;
+		unsigned long _latest_version[3] = { };
 		bool _show_mod = true;
-		bool _overlay_key_setting_active = false, _screenshot_key_setting_active = false, _toggle_key_setting_active = false;
-		float _imgui_col_background[3] = { 0.275f, 0.275f, 0.275f }, _imgui_col_item_background[3] = { 0.447f, 0.447f, 0.447f };
-		float _imgui_col_active[3] = { 0.2f, 0.5f, 0.6f }, _imgui_col_text[3] = { 0.8f, 0.9f, 0.9f }, _imgui_col_text_fps[3] = { 1.0f, 1.0f, 0.0f };
+		bool _show_menu = false;
+		bool _show_clock = false;
+		bool _show_framerate = false;
+		bool _effects_enabled = true;
+		bool _is_fast_loading = false;
+		bool _no_font_scaling = false;
+		bool _no_reload_on_init = false;
+		bool _performance_mode = false;
+		bool _save_imgui_window_state = false;
+		bool _overlay_key_setting_active = false;
+		bool _screenshot_key_setting_active = false;
+		bool _toggle_key_setting_active = false;
+		bool _log_wordwrap = false;
+		float _imgui_col_background[3] = { 0.275f, 0.275f, 0.275f };
+		float _imgui_col_item_background[3] = { 0.447f, 0.447f, 0.447f };
+		float _imgui_col_active[3] = { 0.2f, 0.2f, 1.0f };
+		float _imgui_col_text[3] = { 0.8f, 0.9f, 0.9f };
+		float _imgui_col_text_fps[3] = { 1.0f, 1.0f, 0.0f };
 		float _variable_editor_height = 0.0f;
-		unsigned int _tutorial_index = 0, _effects_expanded_state = 2;
+		unsigned int _tutorial_index = 0;
+		unsigned int _effects_expanded_state = 2;
 		char _effect_filter_buffer[64] = { };
-		size_t _reload_remaining_effects = 0, _texture_count = 0, _uniform_count = 0, _technique_count = 0;
+		size_t _reload_remaining_effects = 0;
+		size_t _texture_count = 0;
+		size_t _uniform_count = 0;
+		size_t _technique_count = 0;
 	};
 }

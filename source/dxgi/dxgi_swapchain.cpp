@@ -5,7 +5,39 @@
 
 #include "log.hpp"
 #include "dxgi_swapchain.hpp"
+#include "../d3d11/d3d11_device_context.hpp"
 #include <algorithm>
+
+void DXGISwapChain::perform_present(UINT PresentFlags)
+{
+	// Some D3D11 games test presentation for timing and composition purposes.
+	// These calls are NOT rendering-related, but rather a status request for the D3D runtime and as such should be ignored.
+	if (!(PresentFlags & DXGI_PRESENT_TEST))
+	{
+		switch (_direct3d_version)
+		{
+		case 10:
+			assert(_runtime != nullptr);
+			std::static_pointer_cast<reshade::d3d10::d3d10_runtime>(_runtime)->on_present();
+			break;
+		case 11:
+			assert(_runtime != nullptr);
+			std::static_pointer_cast<reshade::d3d11::d3d11_runtime>(_runtime)->on_present(static_cast<D3D11Device *>(_direct3d_device)->_immediate_context->_draw_call_tracker);
+			clear_drawcall_stats();
+			break;
+		}
+	}
+}
+
+void DXGISwapChain::clear_drawcall_stats()
+{
+	assert(_direct3d_version == 11);
+
+	const auto device_proxy = static_cast<D3D11Device *>(_direct3d_device);
+	const auto immediate_context_proxy = device_proxy->_immediate_context;
+	immediate_context_proxy->clear_drawcall_stats();
+	device_proxy->clear_drawcall_stats();
+}
 
 // IDXGISwapChain
 HRESULT STDMETHODCALLTYPE DXGISwapChain::QueryInterface(REFIID riid, void **ppvObj)
@@ -22,7 +54,8 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::QueryInterface(REFIID riid, void **ppvO
 		riid == __uuidof(IDXGISwapChain) ||
 		riid == __uuidof(IDXGISwapChain1) ||
 		riid == __uuidof(IDXGISwapChain2) ||
-		riid == __uuidof(IDXGISwapChain3))
+		riid == __uuidof(IDXGISwapChain3) ||
+		riid == __uuidof(IDXGISwapChain4))
 	{
 		#pragma region Update to IDXGISwapChain1 interface
 		if (riid == __uuidof(IDXGISwapChain1) && _interface_version < 1)
@@ -78,6 +111,24 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::QueryInterface(REFIID riid, void **ppvO
 			_interface_version = 3;
 		}
 		#pragma endregion
+		#pragma region Update to IDXGISwapChain4 interface
+		if (riid == __uuidof(IDXGISwapChain4) && _interface_version < 4)
+		{
+			IDXGISwapChain4 *swapchain4 = nullptr;
+
+			if (FAILED(_orig->QueryInterface(&swapchain4)))
+			{
+				return E_NOINTERFACE;
+			}
+
+			_orig->Release();
+
+			LOG(INFO) << "Upgraded 'IDXGISwapChain" << (_interface_version > 0 ? std::to_string(_interface_version) : "") << "' object " << this << " to 'IDXGISwapChain4'.";
+
+			_orig = swapchain4;
+			_interface_version = 4;
+		}
+		#pragma endregion
 
 		AddRef();
 
@@ -114,6 +165,8 @@ ULONG STDMETHODCALLTYPE DXGISwapChain::Release()
 			case 11:
 			{
 				assert(_runtime != nullptr);
+
+				clear_drawcall_stats();
 
 				auto &runtimes = static_cast<D3D11Device *>(_direct3d_device)->_runtimes;
 				const auto runtime = std::static_pointer_cast<reshade::d3d11::d3d11_runtime>(_runtime);
@@ -176,26 +229,14 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::GetDevice(REFIID riid, void **ppDevice)
 }
 HRESULT STDMETHODCALLTYPE DXGISwapChain::Present(UINT SyncInterval, UINT Flags)
 {
-	// Many new D3D11 games will test swapchain presentation for timing and composition purposes.
+	perform_present(Flags);
 	//
 	//  * These calls are NOT render-related, but rather a status request for the D3D runtime.
 	//  * They should not be reshaded or even counted when determining framerate.
 	//
 	if (! (Flags & DXGI_PRESENT_TEST))
 	{
-		switch (_direct3d_version)
-		{
-			case 10:
-				assert(_runtime != nullptr);
-				std::static_pointer_cast<reshade::d3d10::d3d10_runtime>(_runtime)->on_present();
-				break;
-			case 11:
-				assert(_runtime != nullptr);
-				std::static_pointer_cast<reshade::d3d11::d3d11_runtime>(_runtime)->on_present();
-				break;
-		}
 	}
-
 	return _orig->Present(SyncInterval, Flags);
 }
 HRESULT STDMETHODCALLTYPE DXGISwapChain::GetBuffer(UINT Buffer, REFIID riid, void **ppSurface)
@@ -228,6 +269,7 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::ResizeBuffers(UINT BufferCount, UINT Wi
 			break;
 		case 11:
 			assert(_runtime != nullptr);
+			clear_drawcall_stats();
 			std::static_pointer_cast<reshade::d3d11::d3d11_runtime>(_runtime)->on_reset();
 			break;
 	}
@@ -314,27 +356,7 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::GetCoreWindow(REFIID refiid, void **ppU
 HRESULT STDMETHODCALLTYPE DXGISwapChain::Present1(UINT SyncInterval, UINT PresentFlags, const DXGI_PRESENT_PARAMETERS *pPresentParameters)
 {
 	assert(_interface_version >= 1);
-
-	// Many new D3D11 games will test swapchain presentation for timing and composition purposes.
-	//
-	//  * These calls are NOT render-related, but rather a status request for the D3D runtime.
-	//  * They should not be reshaded or even counted when determining framerate.
-	//
-	if (! (PresentFlags & DXGI_PRESENT_TEST))
-	{
-		switch (_direct3d_version)
-		{
-			case 10:
-				assert(_runtime != nullptr);
-				std::static_pointer_cast<reshade::d3d10::d3d10_runtime>(_runtime)->on_present();
-				break;
-			case 11:
-				assert(_runtime != nullptr);
-				std::static_pointer_cast<reshade::d3d11::d3d11_runtime>(_runtime)->on_present();
-				break;
-		}
-	}
-
+	perform_present(PresentFlags);
 	return static_cast<IDXGISwapChain1 *>(_orig)->Present1(SyncInterval, PresentFlags, pPresentParameters);
 }
 BOOL STDMETHODCALLTYPE DXGISwapChain::IsTemporaryMonoSupported()
@@ -451,6 +473,7 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::ResizeBuffers1(UINT BufferCount, UINT W
 			break;
 		case 11:
 			assert(_runtime != nullptr);
+			clear_drawcall_stats();
 			std::static_pointer_cast<reshade::d3d11::d3d11_runtime>(_runtime)->on_reset();
 			break;
 	}
@@ -491,4 +514,12 @@ HRESULT STDMETHODCALLTYPE DXGISwapChain::ResizeBuffers1(UINT BufferCount, UINT W
 	}
 
 	return hr;
+}
+
+// IDXGISwapChain5
+HRESULT STDMETHODCALLTYPE DXGISwapChain::SetHDRMetaData(DXGI_HDR_METADATA_TYPE Type, UINT Size, void *pMetaData)
+{
+	assert(_interface_version >= 4);
+
+	return static_cast<IDXGISwapChain4 *>(_orig)->SetHDRMetaData(Type, Size, pMetaData);
 }

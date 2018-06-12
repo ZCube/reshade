@@ -6,7 +6,7 @@
 #include "log.hpp"
 #include "d3d9_runtime.hpp"
 #include "d3d9_effect_compiler.hpp"
-#include "lexer.hpp"
+#include "effect_lexer.hpp"
 #include "input.hpp"
 #include <imgui.h>
 #include <algorithm>
@@ -40,6 +40,14 @@ namespace reshade::d3d9
 		_behavior_flags = creation_params.BehaviorFlags;
 		_num_samplers = caps.MaxSimultaneousTextures;
 		_num_simultaneous_rendertargets = std::min(caps.NumSimultaneousRTs, DWORD(8));
+
+		subscribe_to_menu("DX9", [this]() { draw_debug_menu(); });
+		subscribe_to_load_config([this](const ini_file& config) {
+			config.get("DX9_BUFFER_DETECTION", "DisableINTZ", _disable_intz);
+		});
+		subscribe_to_save_config([this](ini_file& config) {
+			config.set("DX9_BUFFER_DETECTION", "DisableINTZ", _disable_intz);
+		});
 	}
 
 	bool d3d9_runtime::init_backbuffer_texture()
@@ -154,7 +162,7 @@ namespace reshade::d3d9
 		D3DLOCKED_RECT font_atlas_rect;
 		com_ptr<IDirect3DTexture9> font_atlas;
 
-		const HRESULT hr = _device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &font_atlas, nullptr);
+		HRESULT hr = _device->CreateTexture(width, height, 1, D3DUSAGE_DYNAMIC, D3DFMT_A8R8G8B8, D3DPOOL_DEFAULT, &font_atlas, nullptr);
 
 		if (FAILED(hr) || FAILED(font_atlas->LockRect(0, &font_atlas_rect, nullptr, 0)))
 		{
@@ -173,6 +181,62 @@ namespace reshade::d3d9
 		obj.texture = font_atlas;
 
 		_imgui_font_atlas_texture = std::make_unique<d3d9_tex_data>(obj);
+
+		if (hr = _device->BeginStateBlock(); SUCCEEDED(hr))
+		{
+			_device->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
+			_device->SetPixelShader(nullptr);
+			_device->SetVertexShader(nullptr);
+			_device->SetRenderState(D3DRS_ZENABLE, false);
+			_device->SetRenderState(D3DRS_FILLMODE, D3DFILL_SOLID);
+			_device->SetRenderState(D3DRS_ALPHATESTENABLE, false);
+			_device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
+			_device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
+			_device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
+			_device->SetRenderState(D3DRS_ALPHABLENDENABLE, true);
+			_device->SetRenderState(D3DRS_FOGENABLE, false);
+			_device->SetRenderState(D3DRS_STENCILENABLE, false);
+			_device->SetRenderState(D3DRS_CLIPPING, false);
+			_device->SetRenderState(D3DRS_LIGHTING, false);
+			_device->SetRenderState(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
+			_device->SetRenderState(D3DRS_SCISSORTESTENABLE, true);
+			_device->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
+			_device->SetRenderState(D3DRS_SRGBWRITEENABLE, false);
+			_device->SetRenderState(D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
+			_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
+			_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
+			_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
+			_device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
+			_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
+			_device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
+			_device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
+			_device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
+
+			const D3DMATRIX identity_mat = {
+				1.0f, 0.0f, 0.0f, 0.0f,
+				0.0f, 1.0f, 0.0f, 0.0f,
+				0.0f, 0.0f, 1.0f, 0.0f,
+				0.0f, 0.0f, 0.0f, 1.0f
+			};
+			const D3DMATRIX ortho_projection = {
+				2.0f / _width, 0.0f, 0.0f, 0.0f,
+				0.0f, -2.0f / _height, 0.0f, 0.0f,
+				0.0f, 0.0f, 0.5f, 0.0f,
+				-(_width + 1.0f) / _width, (_height + 1.0f) / _height, 0.5f, 1.0f
+			};
+
+			_device->SetTransform(D3DTS_WORLD, &identity_mat);
+			_device->SetTransform(D3DTS_VIEW, &identity_mat);
+			_device->SetTransform(D3DTS_PROJECTION, &ortho_projection);
+
+			hr = _device->EndStateBlock(&_imgui_state);
+		}
+
+		if (FAILED(hr))
+		{
+			LOG(ERROR) << "Failed to create state block! HRESULT is '" << std::hex << hr << std::dec << "'.";
+			return false;
+		}
 
 		return true;
 	}
@@ -310,7 +374,7 @@ namespace reshade::d3d9
 		_is_multisampling_enabled = pp.MultiSampleType != D3DMULTISAMPLE_NONE;
 		_input = input::register_window(pp.hDeviceWindow);
 
-		if (FAILED(_device->CreateStateBlock(D3DSBT_ALL, &_stateblock)))
+		if (FAILED(_device->CreateStateBlock(D3DSBT_ALL, &_app_state)))
 		{
 			return false;
 		}
@@ -336,7 +400,7 @@ namespace reshade::d3d9
 		runtime::on_reset();
 
 		// Destroy resources
-		_stateblock.reset();
+		_app_state.reset();
 
 		_backbuffer.reset();
 		_backbuffer_resolved.reset();
@@ -357,6 +421,8 @@ namespace reshade::d3d9
 		_imgui_vertex_buffer_size = 0;
 		_imgui_index_buffer_size = 0;
 
+		_imgui_state.reset();
+
 		// Clear depth source table
 		for (auto &it : _depth_source_table)
 		{
@@ -368,20 +434,16 @@ namespace reshade::d3d9
 	void d3d9_runtime::on_present()
 	{
 		if (!is_initialized())
-		{
 			return;
-		}
-
-		detect_depth_source();
 
 		// Begin post processing
 		if (FAILED(_device->BeginScene()))
-		{
 			return;
-		}
+
+		detect_depth_source();
 
 		// Capture device state
-		_stateblock->Capture();
+		_app_state->Capture();
 
 		BOOL software_rendering_enabled;
 		D3DVIEWPORT9 viewport;
@@ -432,7 +494,7 @@ namespace reshade::d3d9
 		}
 
 		// Apply previous device state
-		_stateblock->Apply();
+		_app_state->Apply();
 
 		for (DWORD target = 0; target < _num_simultaneous_rendertargets; target++)
 		{
@@ -731,8 +793,8 @@ namespace reshade::d3d9
 		if (technique.uniform_storage_index >= 0)
 		{
 			const auto uniform_storage_data = reinterpret_cast<const float *>(get_uniform_value_storage().data() + technique.uniform_storage_offset);
-			_device->SetVertexShaderConstantF(0, uniform_storage_data, technique.uniform_storage_index);
-			_device->SetPixelShaderConstantF(0, uniform_storage_data, technique.uniform_storage_index);
+			_device->SetVertexShaderConstantF(0, uniform_storage_data, static_cast<UINT>(technique.uniform_storage_index));
+			_device->SetPixelShaderConstantF(0, uniform_storage_data, static_cast<UINT>(technique.uniform_storage_index));
 		}
 
 		for (const auto &pass_object : technique.passes)
@@ -877,50 +939,14 @@ namespace reshade::d3d9
 
 		// Setup render state: fixed-pipeline, alpha-blending, no face culling, no depth testing
 		_device->SetRenderTarget(0, _backbuffer_resolved.get());
+		for (DWORD target = 1; target < _num_simultaneous_rendertargets; target++)
+		{
+			_device->SetRenderTarget(target, nullptr);
+		}
 		_device->SetDepthStencilSurface(nullptr);
 		_device->SetStreamSource(0, _imgui_vertex_buffer.get(), 0, sizeof(vertex));
 		_device->SetIndices(_imgui_index_buffer.get());
-		_device->SetFVF(D3DFVF_XYZ | D3DFVF_DIFFUSE | D3DFVF_TEX1);
-		_device->SetPixelShader(nullptr);
-		_device->SetVertexShader(nullptr);
-		_device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
-		_device->SetRenderState(D3DRS_LIGHTING, false);
-		_device->SetRenderState(D3DRS_ZENABLE, false);
-		_device->SetRenderState(D3DRS_ALPHABLENDENABLE, true);
-		_device->SetRenderState(D3DRS_ALPHATESTENABLE, false);
-		_device->SetRenderState(D3DRS_BLENDOP, D3DBLENDOP_ADD);
-		_device->SetRenderState(D3DRS_BLENDOPALPHA, D3DBLENDOP_ADD);
-		_device->SetRenderState(D3DRS_SRCBLEND, D3DBLEND_SRCALPHA);
-		_device->SetRenderState(D3DRS_DESTBLEND, D3DBLEND_INVSRCALPHA);
-		_device->SetRenderState(D3DRS_STENCILENABLE, false);
-		_device->SetRenderState(D3DRS_SCISSORTESTENABLE, true);
-		_device->SetRenderState(D3DRS_SRGBWRITEENABLE, false);
-		_device->SetRenderState(D3DRS_COLORWRITEENABLE, D3DCOLORWRITEENABLE_RED | D3DCOLORWRITEENABLE_GREEN | D3DCOLORWRITEENABLE_BLUE | D3DCOLORWRITEENABLE_ALPHA);
-		_device->SetTextureStageState(0, D3DTSS_COLOROP, D3DTOP_MODULATE);
-		_device->SetTextureStageState(0, D3DTSS_COLORARG1, D3DTA_TEXTURE);
-		_device->SetTextureStageState(0, D3DTSS_COLORARG2, D3DTA_DIFFUSE);
-		_device->SetTextureStageState(0, D3DTSS_ALPHAOP, D3DTOP_MODULATE);
-		_device->SetTextureStageState(0, D3DTSS_ALPHAARG1, D3DTA_TEXTURE);
-		_device->SetTextureStageState(0, D3DTSS_ALPHAARG2, D3DTA_DIFFUSE);
-		_device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
-		_device->SetSamplerState(0, D3DSAMP_MAGFILTER, D3DTEXF_LINEAR);
-
-		const D3DMATRIX identity_mat = {
-			1.0f, 0.0f, 0.0f, 0.0f,
-			0.0f, 1.0f, 0.0f, 0.0f,
-			0.0f, 0.0f, 1.0f, 0.0f,
-			0.0f, 0.0f, 0.0f, 1.0f
-		};
-		const D3DMATRIX ortho_projection = {
-			2.0f / _width, 0.0f, 0.0f, 0.0f,
-			0.0f, -2.0f / _height, 0.0f, 0.0f,
-			0.0f, 0.0f, 0.5f, 0.0f,
-			-(_width + 1.0f) / _width, (_height + 1.0f) / _height, 0.5f, 1.0f
-		};
-
-		_device->SetTransform(D3DTS_WORLD, &identity_mat);
-		_device->SetTransform(D3DTS_VIEW, &identity_mat);
-		_device->SetTransform(D3DTS_PROJECTION, &ortho_projection);
+		_imgui_state->Apply();
 
 		// Render command lists
 		UINT vtx_offset = 0, idx_offset = 0;
@@ -948,6 +974,25 @@ namespace reshade::d3d9
 			}
 
 			vtx_offset += cmd_list->VtxBuffer.size();
+		}
+	}
+
+	void d3d9_runtime::draw_debug_menu()
+	{
+		if (ImGui::CollapsingHeader("Buffer Detection", ImGuiTreeNodeFlags_DefaultOpen))
+		{
+			if (ImGui::Checkbox("Disable replacement with INTZ format", &_disable_intz))
+			{
+				runtime::save_config();
+
+				// Force depth-stencil replacement recreation
+				_depthstencil = nullptr;
+			}
+
+			for (const auto &it : _depth_source_table)
+			{
+				ImGui::Text("%s0x%p | %u draw calls ==> %u vertices", (it.first == _depthstencil ? "> " : "  "), it.first, it.second.drawcall_count, it.second.vertices_count);
+			}
 		}
 	}
 
@@ -1020,6 +1065,7 @@ namespace reshade::d3d9
 			create_depthstencil_replacement(best_match);
 		}
 	}
+
 	bool d3d9_runtime::create_depthstencil_replacement(IDirect3DSurface9 *depthstencil)
 	{
 		_depthstencil.reset();
@@ -1028,12 +1074,15 @@ namespace reshade::d3d9
 
 		if (depthstencil != nullptr)
 		{
+			D3DSURFACE_DESC desc;
+			depthstencil->GetDesc(&desc);
+
 			_depthstencil = depthstencil;
 
-			D3DSURFACE_DESC desc;
-			_depthstencil->GetDesc(&desc);
-
-			if (desc.Format != D3DFMT_INTZ && desc.Format != D3DFMT_DF16 && desc.Format != D3DFMT_DF24)
+			if (!_disable_intz &&
+				desc.Format != D3DFMT_INTZ &&
+				desc.Format != D3DFMT_DF16 &&
+				desc.Format != D3DFMT_DF24)
 			{
 				D3DDISPLAYMODE displaymode;
 				_swapchain->GetDisplayMode(&displaymode);
@@ -1088,7 +1137,14 @@ namespace reshade::d3d9
 			{
 				_depthstencil_replacement = _depthstencil;
 
-				_depthstencil_replacement->GetContainer(IID_PPV_ARGS(&_depthstencil_texture));
+				const HRESULT hr = _depthstencil_replacement->GetContainer(IID_PPV_ARGS(&_depthstencil_texture));
+
+				if (FAILED(hr))
+				{
+					LOG(ERROR) << "Failed to retrieve texture from depth surface! HRESULT is '" << std::hex << hr << std::dec << "'.";
+
+					return false;
+				}
 			}
 		}
 

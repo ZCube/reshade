@@ -27,7 +27,8 @@ namespace reshade::opengl
 	{
 		~opengl_pass_data()
 		{
-			glDeleteProgram(program);
+			if (program)
+				glDeleteProgram(program);
 			glDeleteFramebuffers(1, &fbo);
 		}
 
@@ -38,10 +39,21 @@ namespace reshade::opengl
 		GLsizei viewport_width = 0, viewport_height = 0;
 		GLenum draw_buffers[8] = { };
 		GLenum stencil_func = GL_NONE, stencil_op_fail = GL_NONE, stencil_op_z_fail = GL_NONE, stencil_op_z_pass = GL_NONE;
-		GLenum blend_eq_color = GL_NONE, blend_eq_alpha = GL_NONE, blend_src = GL_NONE, blend_dest = GL_NONE;
+		GLenum blend_eq_color = GL_NONE, blend_eq_alpha = GL_NONE, blend_src = GL_NONE, blend_dest = GL_NONE, blend_src_alpha = GL_NONE, blend_dest_alpha = GL_NONE;
 		GLboolean color_mask[4] = { };
 		bool srgb = false, blend = false, stencil_test = false, clear_render_targets = true;
 	};
+	struct opengl_technique_data : base_object
+	{
+		~opengl_technique_data()
+		{
+			glDeleteQueries(1, &query);
+		}
+
+		GLuint query = 0;
+		bool query_in_flight = false;
+	};
+
 	struct opengl_sampler
 	{
 		GLuint id;
@@ -77,7 +89,7 @@ namespace reshade::opengl
 		GLuint _depth_source_fbo = 0, _depth_source = 0, _depth_texture = 0, _blit_fbo = 0;
 		std::vector<struct opengl_sampler> _effect_samplers;
 		GLuint _default_vao = 0;
-		std::vector<std::pair<GLuint, GLsizei>> _effect_ubos;
+		std::vector<std::pair<GLuint, GLsizeiptr>> _effect_ubos;
 
 	private:
 		struct depth_source_info

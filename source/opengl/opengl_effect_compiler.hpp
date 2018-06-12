@@ -5,8 +5,9 @@
 
 #pragma once
 
+#include "effect_syntax_tree.hpp"
 #include <sstream>
-#include "syntax_tree.hpp"
+#include <unordered_set>
 
 namespace reshade::opengl
 {
@@ -28,7 +29,7 @@ namespace reshade::opengl
 
 		void visit(std::stringstream &output, const reshadefx::nodes::statement_node *node);
 		void visit(std::stringstream &output, const reshadefx::nodes::expression_node *node);
-		void visit(std::stringstream &output, const reshadefx::nodes::type_node &type, bool with_qualifiers = true);
+		void visit(std::stringstream &output, const reshadefx::nodes::type_node &type, bool with_qualifiers, bool with_inout);
 		void visit(std::stringstream &output, const reshadefx::nodes::lvalue_expression_node *node);
 		void visit(std::stringstream &output, const reshadefx::nodes::literal_expression_node *node);
 		void visit(std::stringstream &output, const reshadefx::nodes::expression_sequence_node *node);
@@ -54,7 +55,7 @@ namespace reshade::opengl
 		void visit(std::stringstream &output, const reshadefx::nodes::return_statement_node *node);
 		void visit(std::stringstream &output, const reshadefx::nodes::jump_statement_node *node);
 		void visit(std::stringstream &output, const reshadefx::nodes::struct_declaration_node *node);
-		void visit(std::stringstream &output, const reshadefx::nodes::variable_declaration_node *node, bool with_type = true);
+		void visit(std::stringstream &output, const reshadefx::nodes::variable_declaration_node *node, bool with_type, bool with_qualifiers, bool with_inout);
 		void visit(std::stringstream &output, const reshadefx::nodes::function_declaration_node *node);
 
 		void visit_texture(const reshadefx::nodes::variable_declaration_node *node);
@@ -78,6 +79,10 @@ namespace reshade::opengl
 		std::stringstream _global_code, _global_uniforms;
 		const reshadefx::nodes::function_declaration_node *_current_function;
 		std::unordered_map<const reshadefx::nodes::function_declaration_node *, function> _functions;
-		int _uniform_storage_offset = 0, _uniform_buffer_size = 0;
+		GLintptr _uniform_storage_offset = 0, _uniform_buffer_size = 0;
+#if RESHADE_DUMP_NATIVE_SHADERS
+		filesystem::path _dump_filename;
+		std::unordered_set<std::string> _dumped_shaders;
+#endif
 	};
 }

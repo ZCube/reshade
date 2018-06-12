@@ -5,11 +5,16 @@
 
 #include "d3d9_runtime.hpp"
 #include "d3d9_effect_compiler.hpp"
-#include "constant_folding.hpp"
 #include <assert.h>
 #include <iomanip>
+#include <fstream>
 #include <algorithm>
 #include <d3dcompiler.h>
+
+namespace reshadefx
+{
+	void scalar_literal_cast(const nodes::literal_expression_node *from, size_t i, float &to);
+}
 
 namespace reshade::d3d9
 {
@@ -26,20 +31,49 @@ namespace reshade::d3d9
 		{
 			case pass_declaration_node::ZERO:
 				return D3DBLEND_ZERO;
+			default:
 			case pass_declaration_node::ONE:
 				return D3DBLEND_ONE;
+			case pass_declaration_node::SRCCOLOR:
+				return D3DBLEND_SRCCOLOR;
+			case pass_declaration_node::INVSRCCOLOR:
+				return D3DBLEND_INVSRCCOLOR;
+			case pass_declaration_node::SRCALPHA:
+				return D3DBLEND_SRCALPHA;
+			case pass_declaration_node::INVSRCALPHA:
+				return D3DBLEND_INVSRCALPHA;
+			case pass_declaration_node::DESTALPHA:
+				return D3DBLEND_DESTALPHA;
+			case pass_declaration_node::INVDESTALPHA:
+				return D3DBLEND_INVDESTALPHA;
+			case pass_declaration_node::DESTCOLOR:
+				return D3DBLEND_DESTCOLOR;
+			case pass_declaration_node::INVDESTCOLOR:
+				return D3DBLEND_INVDESTCOLOR;
 		}
-
-		return static_cast<D3DBLEND>(value);
 	}
 	static D3DSTENCILOP literal_to_stencil_op(unsigned int value)
 	{
-		if (value == pass_declaration_node::ZERO)
+		switch (value)
 		{
-			return D3DSTENCILOP_ZERO;
+			default:
+			case pass_declaration_node::KEEP:
+				return D3DSTENCILOP_KEEP;
+			case pass_declaration_node::ZERO:
+				return D3DSTENCILOP_ZERO;
+			case pass_declaration_node::REPLACE:
+				return D3DSTENCILOP_REPLACE;
+			case pass_declaration_node::INCRSAT:
+				return D3DSTENCILOP_INCRSAT;
+			case pass_declaration_node::DECRSAT:
+				return D3DSTENCILOP_DECRSAT;
+			case pass_declaration_node::INVERT:
+				return D3DSTENCILOP_INVERT;
+			case pass_declaration_node::INCR:
+				return D3DSTENCILOP_INCR;
+			case pass_declaration_node::DECR:
+				return D3DSTENCILOP_DECR;
 		}
-
-		return static_cast<D3DSTENCILOP>(value);
 	}
 	static D3DFORMAT literal_to_format(texture_format value)
 	{
@@ -117,6 +151,14 @@ namespace reshade::d3d9
 		_skip_shader_optimization(skipoptimization),
 		_current_function(nullptr)
 	{
+#if RESHADE_DUMP_NATIVE_SHADERS
+		if (_ast.techniques.size() == 0)
+			return;
+		_dump_filename = _ast.techniques[0]->location.source;
+		_dump_filename = "ReShade-ShaderDump-" + _dump_filename.filename_without_extension().string() + ".hlsl";
+
+		std::ofstream(_dump_filename.string(), std::ios::trunc);
+#endif
 	}
 
 	bool d3d9_effect_compiler::run()
@@ -690,6 +732,14 @@ namespace reshade::d3d9
 				part1 = "fwidth(";
 				part2 = ")";
 				break;
+			case intrinsic_expression_node::isinf:
+				part1 = "isinf(";
+				part2 = ")";
+				break;
+			case intrinsic_expression_node::isnan:
+				part1 = "isnan(";
+				part2 = ")";
+				break;
 			case intrinsic_expression_node::ldexp:
 				part1 = "ldexp(";
 				part2 = ", ";
@@ -830,9 +880,9 @@ namespace reshade::d3d9
 				part3 = ")";
 				break;
 			case intrinsic_expression_node::texture_fetch:
-				part1 = "tex2Dlod((";
-				part2 = ").s, float4(";
-				part3 = "))";
+				part1 = "__tex2Dfetch(";
+				part2 = ", ";
+				part3 = ")";
 				break;
 			case intrinsic_expression_node::texture_gather:
 				if (node->arguments[2]->id == nodeid::literal_expression && node->arguments[2]->type.is_integral())
@@ -1373,7 +1423,7 @@ namespace reshade::d3d9
 		if (node->type.is_array())
 		{
 			output << '[';
-			
+
 			if (node->type.array_length > 0)
 			{
 				output << node->type.array_length;
@@ -1417,6 +1467,21 @@ namespace reshade::d3d9
 
 	void d3d9_effect_compiler::visit_texture(const variable_declaration_node *node)
 	{
+		const auto existing_texture = _runtime->find_texture(node->unique_name);
+
+		if (existing_texture != nullptr)
+		{
+			if (node->semantic.empty() && (
+				existing_texture->width != node->properties.width ||
+				existing_texture->height != node->properties.height ||
+				existing_texture->levels != node->properties.levels ||
+				existing_texture->format != node->properties.format))
+			{
+				error(node->location, existing_texture->effect_filename + " already created a texture with the same name but different dimensions; textures are shared across all effects, so either rename the variable or adjust the dimensions so they match");
+			}
+			return;
+		}
+
 		texture obj;
 		obj.impl = std::make_unique<d3d9_tex_data>();
 		const auto obj_data = obj.impl->as<d3d9_tex_data>();
@@ -1435,6 +1500,11 @@ namespace reshade::d3d9
 		else if (node->semantic == "DEPTH" || node->semantic == "SV_DEPTH")
 		{
 			_runtime->update_texture_reference(obj, texture_reference::depth_buffer);
+		}
+		else if (!node->semantic.empty())
+		{
+			error(node->location, "invalid semantic");
+			return;
 		}
 		else
 		{
@@ -1479,7 +1549,7 @@ namespace reshade::d3d9
 	}
 	void d3d9_effect_compiler::visit_sampler(const variable_declaration_node *node)
 	{
-		const auto texture = _runtime->find_texture(node->properties.texture->name);
+		const auto texture = _runtime->find_texture(node->properties.texture->unique_name);
 
 		if (texture == nullptr)
 		{
@@ -1493,21 +1563,13 @@ namespace reshade::d3d9
 		sampler.states[D3DSAMP_ADDRESSV] = static_cast<D3DTEXTUREADDRESS>(node->properties.address_v);
 		sampler.states[D3DSAMP_ADDRESSW] = static_cast<D3DTEXTUREADDRESS>(node->properties.address_w);
 		sampler.states[D3DSAMP_BORDERCOLOR] = 0;
+		sampler.states[D3DSAMP_MAGFILTER] = 1 + ((static_cast<unsigned int>(node->properties.filter) & 0x0C) >> 2);
+		sampler.states[D3DSAMP_MINFILTER] = 1 + ((static_cast<unsigned int>(node->properties.filter) & 0x30) >> 4);
+		sampler.states[D3DSAMP_MIPFILTER] = 1 + ((static_cast<unsigned int>(node->properties.filter) & 0x03));
 		sampler.states[D3DSAMP_MIPMAPLODBIAS] = *reinterpret_cast<const DWORD *>(&node->properties.lod_bias);
 		sampler.states[D3DSAMP_MAXMIPLEVEL] = static_cast<DWORD>(std::max(0.0f, node->properties.min_lod));
-		sampler.states[D3DSAMP_MAXANISOTROPY] = node->properties.max_anisotropy;
+		sampler.states[D3DSAMP_MAXANISOTROPY] = 1;
 		sampler.states[D3DSAMP_SRGBTEXTURE] = node->properties.srgb_texture;
-
-		if (node->properties.filter == texture_filter::anisotropic)
-		{
-			sampler.states[D3DSAMP_MINFILTER] = sampler.states[D3DSAMP_MAGFILTER] = sampler.states[D3DSAMP_MIPFILTER] = D3DTEXF_ANISOTROPIC;
-		}
-		else
-		{
-			sampler.states[D3DSAMP_MINFILTER] = 1 + ((static_cast<unsigned int>(node->properties.filter) & 0x30) >> 4);
-			sampler.states[D3DSAMP_MAGFILTER] = 1 + ((static_cast<unsigned int>(node->properties.filter) & 0xC) >> 2);
-			sampler.states[D3DSAMP_MIPFILTER] = 1 + ((static_cast<unsigned int>(node->properties.filter) & 0x3));
-		}
 
 		_samplers[node->name] = sampler;
 	}
@@ -1703,8 +1765,8 @@ namespace reshade::d3d9
 		device->SetRenderState(D3DRS_BLENDFACTOR, 0xFFFFFFFF);
 		device->SetRenderState(D3DRS_SRGBWRITEENABLE, node->srgb_write_enable);
 		device->SetRenderState(D3DRS_SEPARATEALPHABLENDENABLE, false);
-		device->SetRenderState(D3DRS_SRCBLENDALPHA, D3DBLEND_ONE);
-		device->SetRenderState(D3DRS_DESTBLENDALPHA, D3DBLEND_ZERO);
+		device->SetRenderState(D3DRS_SRCBLENDALPHA, literal_to_blend_func(node->src_blend_alpha));
+		device->SetRenderState(D3DRS_DESTBLENDALPHA, literal_to_blend_func(node->dest_blend_alpha));
 		device->SetRenderState(D3DRS_BLENDOPALPHA, static_cast<D3DBLENDOP>(node->blend_op_alpha));
 		device->SetRenderState(D3DRS_FOGENABLE, false);
 		device->SetRenderState(D3DRS_CULLMODE, D3DCULL_NONE);
@@ -1728,7 +1790,7 @@ namespace reshade::d3d9
 				break;
 			}
 
-			const auto texture = _runtime->find_texture(node->render_targets[i]->name);
+			const auto texture = _runtime->find_texture(node->render_targets[i]->unique_name);
 
 			if (texture == nullptr)
 			{
@@ -1746,6 +1808,10 @@ namespace reshade::d3d9
 		source <<
 			"#pragma warning(disable: 3571)\n"
 			"struct __sampler2D { sampler2D s; float2 pixelsize; };\n"
+			"float4 __tex2Dfetch(__sampler2D s, int4 c) { return tex2Dlod(s.s, float4(c.xy * (c.w + 1) * s.pixelsize, 0, 0)); }\n"
+			"float4 __tex2Dlodoffset(__sampler2D s, float4 c, int2 offset) { return tex2Dlod(s.s, c + float4(offset * s.pixelsize, 0, 0)); }\n"
+			"float4 __tex2Doffset(__sampler2D s, float2 c, int2 offset) { return tex2D(s.s, c + offset * s.pixelsize); }\n"
+			"int2 __tex2Dsize(__sampler2D s, int lod) { return int2(1 / s.pixelsize) / exp2(lod); }\n"
 			"float4 __tex2Dgather0(__sampler2D s, float2 c) { return float4(tex2Dlod(s.s, float4(c + float2(0, 1) * s.pixelsize, 0, 0)).r, tex2Dlod(s.s, float4(c + float2(1, 1) * s.pixelsize.xy, 0, 0)).r, tex2Dlod(s.s, float4(c + float2(1, 0) * s.pixelsize.xy, 0, 0)).r, tex2Dlod(s.s, float4(c, 0, 0)).r); }\n"
 			"float4 __tex2Dgather1(__sampler2D s, float2 c) { return float4(tex2Dlod(s.s, float4(c + float2(0, 1) * s.pixelsize, 0, 0)).g, tex2Dlod(s.s, float4(c + float2(1, 1) * s.pixelsize.xy, 0, 0)).g, tex2Dlod(s.s, float4(c + float2(1, 0) * s.pixelsize.xy, 0, 0)).g, tex2Dlod(s.s, float4(c, 0, 0)).g); }\n"
 			"float4 __tex2Dgather2(__sampler2D s, float2 c) { return float4(tex2Dlod(s.s, float4(c + float2(0, 1) * s.pixelsize, 0, 0)).b, tex2Dlod(s.s, float4(c + float2(1, 1) * s.pixelsize.xy, 0, 0)).b, tex2Dlod(s.s, float4(c + float2(1, 0) * s.pixelsize.xy, 0, 0)).b, tex2Dlod(s.s, float4(c, 0, 0)).b); }\n"
@@ -1753,10 +1819,7 @@ namespace reshade::d3d9
 			"float4 __tex2Dgather0offset(__sampler2D s, float2 c, int2 offset) { return __tex2Dgather0(s, c + offset * s.pixelsize); }\n"
 			"float4 __tex2Dgather1offset(__sampler2D s, float2 c, int2 offset) { return __tex2Dgather1(s, c + offset * s.pixelsize); }\n"
 			"float4 __tex2Dgather2offset(__sampler2D s, float2 c, int2 offset) { return __tex2Dgather2(s, c + offset * s.pixelsize); }\n"
-			"float4 __tex2Dgather3offset(__sampler2D s, float2 c, int2 offset) { return __tex2Dgather3(s, c + offset * s.pixelsize); }\n"
-			"float4 __tex2Dlodoffset(__sampler2D s, float4 c, int2 offset) { return tex2Dlod(s.s, c + float4(offset * s.pixelsize, 0, 0)); }\n"
-			"float4 __tex2Doffset(__sampler2D s, float2 c, int2 offset) { return tex2D(s.s, c + offset * s.pixelsize); }\n"
-			"int2 __tex2Dsize(__sampler2D s, int lod) { return int2(1 / s.pixelsize) / exp2(lod); }\n";
+			"float4 __tex2Dgather3offset(__sampler2D s, float2 c, int2 offset) { return __tex2Dgather3(s, c + offset * s.pixelsize); }\n";
 
 		if (shadertype == "vs")
 		{
@@ -1965,6 +2028,22 @@ namespace reshade::d3d9
 
 		source << "}\n";
 
+		const std::string source_str = source.str();
+
+#if RESHADE_DUMP_NATIVE_SHADERS
+		if (!_dumped_shaders.count(node->unique_name))
+		{
+			std::ofstream dumpfile(_dump_filename.string(), std::ios::app);
+
+			if (dumpfile.is_open())
+			{
+				dumpfile << "#ifdef RESHADE_SHADER_" << shadertype << "_" << node->unique_name << std::endl << source_str << "#endif" << std::endl << std::endl;
+
+				_dumped_shaders.insert(node->unique_name);
+			}
+		}
+#endif
+
 		UINT flags = 0;
 		com_ptr<ID3DBlob> compiled, errors;
 
@@ -1974,7 +2053,6 @@ namespace reshade::d3d9
 		}
 
 		const auto D3DCompile = reinterpret_cast<pD3DCompile>(GetProcAddress(_d3dcompiler_module, "D3DCompile"));
-		const std::string source_str = source.str();
 		HRESULT hr = D3DCompile(source_str.c_str(), source_str.size(), nullptr, nullptr, nullptr, "__main", (shadertype + "_3_0").c_str(), flags, 0, &compiled, &errors);
 
 		if (errors != nullptr)

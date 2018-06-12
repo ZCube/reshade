@@ -7,6 +7,7 @@
 #include "d3d10_effect_compiler.hpp"
 #include <assert.h>
 #include <iomanip>
+#include <fstream>
 #include <algorithm>
 #include <d3dcompiler.h>
 
@@ -15,7 +16,7 @@ namespace reshade::d3d10
 	using namespace reshadefx;
 	using namespace reshadefx::nodes;
 
-	static inline UINT roundto16(UINT size)
+	static inline size_t roundto16(size_t size)
 	{
 		return (size + 15) & ~15;
 	}
@@ -25,20 +26,49 @@ namespace reshade::d3d10
 		{
 			case pass_declaration_node::ZERO:
 				return D3D10_BLEND_ZERO;
+			default:
 			case pass_declaration_node::ONE:
 				return D3D10_BLEND_ONE;
+			case pass_declaration_node::SRCCOLOR:
+				return D3D10_BLEND_SRC_COLOR;
+			case pass_declaration_node::INVSRCCOLOR:
+				return D3D10_BLEND_INV_SRC_COLOR;
+			case pass_declaration_node::SRCALPHA:
+				return D3D10_BLEND_SRC_ALPHA;
+			case pass_declaration_node::INVSRCALPHA:
+				return D3D10_BLEND_INV_SRC_ALPHA;
+			case pass_declaration_node::DESTALPHA:
+				return D3D10_BLEND_DEST_ALPHA;
+			case pass_declaration_node::INVDESTALPHA:
+				return D3D10_BLEND_INV_DEST_ALPHA;
+			case pass_declaration_node::DESTCOLOR:
+				return D3D10_BLEND_DEST_COLOR;
+			case pass_declaration_node::INVDESTCOLOR:
+				return D3D10_BLEND_INV_DEST_COLOR;
 		}
-
-		return static_cast<D3D10_BLEND>(value);
 	}
 	static D3D10_STENCIL_OP literal_to_stencil_op(unsigned int value)
 	{
-		if (value == pass_declaration_node::ZERO)
+		switch (value)
 		{
-			return D3D10_STENCIL_OP_ZERO;
+			default:
+			case pass_declaration_node::KEEP:
+				return D3D10_STENCIL_OP_KEEP;
+			case pass_declaration_node::ZERO:
+				return D3D10_STENCIL_OP_ZERO;
+			case pass_declaration_node::REPLACE:
+				return D3D10_STENCIL_OP_REPLACE;
+			case pass_declaration_node::INCRSAT:
+				return D3D10_STENCIL_OP_INCR_SAT;
+			case pass_declaration_node::DECRSAT:
+				return D3D10_STENCIL_OP_DECR_SAT;
+			case pass_declaration_node::INVERT:
+				return D3D10_STENCIL_OP_INVERT;
+			case pass_declaration_node::INCR:
+				return D3D10_STENCIL_OP_INCR;
+			case pass_declaration_node::DECR:
+				return D3D10_STENCIL_OP_DECR;
 		}
-
-		return static_cast<D3D10_STENCIL_OP>(value);
 	}
 	static DXGI_FORMAT literal_to_format(texture_format value)
 	{
@@ -168,6 +198,14 @@ namespace reshade::d3d10
 		_errors(errors),
 		_skip_shader_optimization(skipoptimization)
 	{
+#if RESHADE_DUMP_NATIVE_SHADERS
+		if (_ast.techniques.size() == 0)
+			return;
+		_dump_filename = _ast.techniques[0]->location.source;
+		_dump_filename = "ReShade-ShaderDump-" + _dump_filename.filename_without_extension().string() + ".hlsl";
+
+		std::ofstream(_dump_filename.string(), std::ios::trunc);
+#endif
 	}
 
 	bool d3d10_effect_compiler::run()
@@ -225,13 +263,13 @@ namespace reshade::d3d10
 			_constant_buffer_size = roundto16(_constant_buffer_size);
 			_runtime->get_uniform_value_storage().resize(_uniform_storage_offset + _constant_buffer_size);
 
-			const CD3D10_BUFFER_DESC globals_desc(_constant_buffer_size, D3D10_BIND_CONSTANT_BUFFER, D3D10_USAGE_DYNAMIC, D3D10_CPU_ACCESS_WRITE);
-			const D3D10_SUBRESOURCE_DATA globals_initial = { _runtime->get_uniform_value_storage().data(), _constant_buffer_size };
+			const CD3D10_BUFFER_DESC globals_desc(static_cast<UINT>(_constant_buffer_size), D3D10_BIND_CONSTANT_BUFFER, D3D10_USAGE_DYNAMIC, D3D10_CPU_ACCESS_WRITE);
+			const D3D10_SUBRESOURCE_DATA globals_initial = { _runtime->get_uniform_value_storage().data(), static_cast<UINT>(_constant_buffer_size) };
 
 			com_ptr<ID3D10Buffer> constant_buffer;
 			_runtime->_device->CreateBuffer(&globals_desc, &globals_initial, &constant_buffer);
 
-			_runtime->_constant_buffers.push_back(constant_buffer);
+			_runtime->_constant_buffers.push_back(std::move(constant_buffer));
 		}
 
 		FreeLibrary(_d3dcompiler_module);
@@ -739,6 +777,14 @@ namespace reshade::d3d10
 				break;
 			case intrinsic_expression_node::fwidth:
 				part1 = "fwidth(";
+				part2 = ")";
+				break;
+			case intrinsic_expression_node::isinf:
+				part1 = "isinf(";
+				part2 = ")";
+				break;
+			case intrinsic_expression_node::isnan:
+				part1 = "isnan(";
 				part2 = ")";
 				break;
 			case intrinsic_expression_node::ldexp:
@@ -1456,76 +1502,107 @@ namespace reshade::d3d10
 
 	void d3d10_effect_compiler::visit_texture(const variable_declaration_node *node)
 	{
-		texture obj;
-		D3D10_TEXTURE2D_DESC texdesc = { };
-		obj.name = node->name;
-		obj.unique_name = node->unique_name;
-		obj.annotations = node->annotation_list;
-		texdesc.Width = obj.width = node->properties.width;
-		texdesc.Height = obj.height = node->properties.height;
-		texdesc.MipLevels = obj.levels = node->properties.levels;
-		texdesc.ArraySize = 1;
-		texdesc.Format = literal_to_format(obj.format = node->properties.format);
-		texdesc.SampleDesc.Count = 1;
-		texdesc.SampleDesc.Quality = 0;
-		texdesc.Usage = D3D10_USAGE_DEFAULT;
-		texdesc.BindFlags = D3D10_BIND_SHADER_RESOURCE | D3D10_BIND_RENDER_TARGET;
-		texdesc.MiscFlags = D3D10_RESOURCE_MISC_GENERATE_MIPS;
-
 		size_t texture_register_index, texture_register_index_srgb;
 
-		if (node->semantic == "COLOR" || node->semantic == "SV_TARGET")
-		{
-			obj.width = _runtime->frame_width();
-			obj.height = _runtime->frame_height();
-			obj.impl_reference = texture_reference::back_buffer;
+		const auto existing_texture = _runtime->find_texture(node->unique_name);
 
-			texture_register_index = 0;
-			texture_register_index_srgb = 1;
-		}
-		else if (node->semantic == "DEPTH" || node->semantic == "SV_DEPTH")
+		if (existing_texture != nullptr)
 		{
-			obj.width = _runtime->frame_width();
-			obj.height = _runtime->frame_height();
-			obj.impl_reference = texture_reference::depth_buffer;
+			if (node->semantic == "COLOR" || node->semantic == "SV_TARGET")
+			{
+				texture_register_index = 0;
+				texture_register_index_srgb = 1;
+			}
+			else if (node->semantic == "DEPTH" || node->semantic == "SV_DEPTH")
+			{
+				texture_register_index = 2;
+				texture_register_index_srgb = 2;
+			}
+			else if (!node->semantic.empty())
+			{
+				error(node->location, "invalid semantic");
+				return;
+			}
+			else
+			{
+				if (existing_texture->width != node->properties.width ||
+					existing_texture->height != node->properties.height ||
+					existing_texture->levels != node->properties.levels ||
+					existing_texture->format != node->properties.format)
+				{
+					error(node->location, existing_texture->effect_filename + " already created a texture with the same name but different dimensions; textures are shared across all effects, so either rename the variable or adjust the dimensions so they match");
+					return;
+				}
 
-			texture_register_index = 2;
-			texture_register_index_srgb = 2;
+				const auto obj_data = existing_texture->impl->as<d3d10_tex_data>();
+
+				texture_register_index = std::distance(_runtime->_effect_shader_resources.begin(), std::find(_runtime->_effect_shader_resources.begin(), _runtime->_effect_shader_resources.end(), obj_data->srv[0]));
+
+				if (obj_data->srv[1] != nullptr)
+				{
+					texture_register_index_srgb = std::distance(_runtime->_effect_shader_resources.begin(), std::find(_runtime->_effect_shader_resources.begin(), _runtime->_effect_shader_resources.end(), obj_data->srv[1]));
+				}
+				else
+				{
+					texture_register_index_srgb = texture_register_index;
+				}
+			}
 		}
 		else
 		{
-			obj.impl = std::make_unique<d3d10_tex_data>();
-			const auto obj_data = obj.impl->as<d3d10_tex_data>();
+			texture obj;
+			D3D10_TEXTURE2D_DESC texdesc = { };
+			obj.name = node->name;
+			obj.unique_name = node->unique_name;
+			obj.annotations = node->annotation_list;
+			texdesc.Width = obj.width = node->properties.width;
+			texdesc.Height = obj.height = node->properties.height;
+			texdesc.MipLevels = obj.levels = node->properties.levels;
+			texdesc.ArraySize = 1;
+			texdesc.Format = literal_to_format(obj.format = node->properties.format);
+			texdesc.SampleDesc.Count = 1;
+			texdesc.SampleDesc.Quality = 0;
+			texdesc.Usage = D3D10_USAGE_DEFAULT;
+			texdesc.BindFlags = D3D10_BIND_SHADER_RESOURCE | D3D10_BIND_RENDER_TARGET;
+			texdesc.MiscFlags = D3D10_RESOURCE_MISC_GENERATE_MIPS;
 
-			HRESULT hr = _runtime->_device->CreateTexture2D(&texdesc, nullptr, &obj_data->texture);
-
-			if (FAILED(hr))
+			if (node->semantic == "COLOR" || node->semantic == "SV_TARGET")
 			{
-				error(node->location, "'ID3D10Device::CreateTexture2D' failed with error code " + std::to_string(static_cast<unsigned long>(hr)) + "!");
-				return;
+				obj.width = _runtime->frame_width();
+				obj.height = _runtime->frame_height();
+				obj.impl_reference = texture_reference::back_buffer;
+
+				texture_register_index = 0;
+				texture_register_index_srgb = 1;
 			}
-
-			D3D10_SHADER_RESOURCE_VIEW_DESC srvdesc = { };
-			srvdesc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
-			srvdesc.Texture2D.MipLevels = texdesc.MipLevels;
-			srvdesc.Format = make_format_normal(texdesc.Format);
-
-			hr = _runtime->_device->CreateShaderResourceView(obj_data->texture.get(), &srvdesc, &obj_data->srv[0]);
-
-			if (FAILED(hr))
+			else if (node->semantic == "DEPTH" || node->semantic == "SV_DEPTH")
 			{
-				error(node->location, "'ID3D10Device::CreateShaderResourceView' failed with error code " + std::to_string(static_cast<unsigned long>(hr)) + "!");
-				return;
+				obj.width = _runtime->frame_width();
+				obj.height = _runtime->frame_height();
+				obj.impl_reference = texture_reference::depth_buffer;
+
+				texture_register_index = 2;
+				texture_register_index_srgb = 2;
 			}
-
-			srvdesc.Format = make_format_srgb(texdesc.Format);
-
-			texture_register_index = _runtime->_effect_shader_resources.size();
-			_runtime->_effect_shader_resources.push_back(obj_data->srv[0].get());
-
-			if (srvdesc.Format != texdesc.Format)
+			else
 			{
-				hr = _runtime->_device->CreateShaderResourceView(obj_data->texture.get(), &srvdesc, &obj_data->srv[1]);
+				obj.impl = std::make_unique<d3d10_tex_data>();
+				const auto obj_data = obj.impl->as<d3d10_tex_data>();
+
+				HRESULT hr = _runtime->_device->CreateTexture2D(&texdesc, nullptr, &obj_data->texture);
+
+				if (FAILED(hr))
+				{
+					error(node->location, "'ID3D10Device::CreateTexture2D' failed with error code " + std::to_string(static_cast<unsigned long>(hr)) + "!");
+					return;
+				}
+
+				D3D10_SHADER_RESOURCE_VIEW_DESC srvdesc = { };
+				srvdesc.ViewDimension = D3D10_SRV_DIMENSION_TEXTURE2D;
+				srvdesc.Texture2D.MipLevels = texdesc.MipLevels;
+				srvdesc.Format = make_format_normal(texdesc.Format);
+
+				hr = _runtime->_device->CreateShaderResourceView(obj_data->texture.get(), &srvdesc, &obj_data->srv[0]);
 
 				if (FAILED(hr))
 				{
@@ -1533,35 +1610,51 @@ namespace reshade::d3d10
 					return;
 				}
 
-				texture_register_index_srgb = _runtime->_effect_shader_resources.size();
-				_runtime->_effect_shader_resources.push_back(obj_data->srv[1].get());
+				srvdesc.Format = make_format_srgb(texdesc.Format);
+
+				texture_register_index = _runtime->_effect_shader_resources.size();
+				_runtime->_effect_shader_resources.push_back(obj_data->srv[0]);
+
+				if (srvdesc.Format != texdesc.Format)
+				{
+					hr = _runtime->_device->CreateShaderResourceView(obj_data->texture.get(), &srvdesc, &obj_data->srv[1]);
+
+					if (FAILED(hr))
+					{
+						error(node->location, "'ID3D10Device::CreateShaderResourceView' failed with error code " + std::to_string(static_cast<unsigned long>(hr)) + "!");
+						return;
+					}
+
+					texture_register_index_srgb = _runtime->_effect_shader_resources.size();
+					_runtime->_effect_shader_resources.push_back(obj_data->srv[1]);
+				}
+				else
+				{
+					texture_register_index_srgb = texture_register_index;
+				}
 			}
-			else
-			{
-				texture_register_index_srgb = texture_register_index;
-			}
+
+			_runtime->add_texture(std::move(obj));
 		}
 
 		_global_code << "Texture2D " <<
 			node->unique_name << " : register(t" << texture_register_index << "), __" <<
 			node->unique_name << "SRGB : register(t" << texture_register_index_srgb << ");\n";
-
-		_runtime->add_texture(std::move(obj));
 	}
 	void d3d10_effect_compiler::visit_sampler(const variable_declaration_node *node)
 	{
-		D3D10_SAMPLER_DESC desc;
+		D3D10_SAMPLER_DESC desc = { };
 		desc.Filter = static_cast<D3D10_FILTER>(node->properties.filter);
 		desc.AddressU = static_cast<D3D10_TEXTURE_ADDRESS_MODE>(node->properties.address_u);
 		desc.AddressV = static_cast<D3D10_TEXTURE_ADDRESS_MODE>(node->properties.address_v);
 		desc.AddressW = static_cast<D3D10_TEXTURE_ADDRESS_MODE>(node->properties.address_w);
 		desc.MipLODBias = node->properties.lod_bias;
+		desc.MaxAnisotropy = 1;
+		desc.ComparisonFunc = D3D10_COMPARISON_NEVER;
 		desc.MinLOD = node->properties.min_lod;
 		desc.MaxLOD = node->properties.max_lod;
-		desc.MaxAnisotropy = node->properties.max_anisotropy;
-		desc.ComparisonFunc = D3D10_COMPARISON_NEVER;
 
-		const auto texture = _runtime->find_texture(node->properties.texture->name);
+		const auto texture = _runtime->find_texture(node->properties.texture->unique_name);
 
 		if (texture == nullptr)
 		{
@@ -1577,7 +1670,7 @@ namespace reshade::d3d10
 
 		if (it == _runtime->_effect_sampler_descs.end())
 		{
-			ID3D10SamplerState *sampler = nullptr;
+			com_ptr<ID3D10SamplerState> sampler;
 
 			HRESULT hr = _runtime->_device->CreateSamplerState(&desc, &sampler);
 
@@ -1587,7 +1680,7 @@ namespace reshade::d3d10
 				return;
 			}
 
-			_runtime->_effect_sampler_states.push_back(sampler);
+			_runtime->_effect_sampler_states.push_back(std::move(sampler));
 			it = _runtime->_effect_sampler_descs.emplace(desc_hash, _runtime->_effect_sampler_states.size() - 1).first;
 		}
 
@@ -1659,8 +1752,17 @@ namespace reshade::d3d10
 	void d3d10_effect_compiler::visit_technique(const technique_declaration_node *node)
 	{
 		technique obj;
+		obj.impl = std::make_unique<d3d10_technique_data>();
 		obj.name = node->name;
 		obj.annotations = node->annotation_list;
+
+		auto obj_data = obj.impl->as<d3d10_technique_data>();
+		D3D10_QUERY_DESC query_desc = { };
+		query_desc.Query = D3D10_QUERY_TIMESTAMP;
+		_runtime->_device->CreateQuery(&query_desc, &obj_data->timestamp_query_beg);
+		_runtime->_device->CreateQuery(&query_desc, &obj_data->timestamp_query_end);
+		query_desc.Query = D3D10_QUERY_TIMESTAMP_DISJOINT;
+		_runtime->_device->CreateQuery(&query_desc, &obj_data->timestamp_disjoint);
 
 		if (_constant_buffer_size != 0)
 		{
@@ -1697,8 +1799,8 @@ namespace reshade::d3d10
 		}
 
 		const int target_index = node->srgb_write_enable ? 1 : 0;
-		pass.render_targets[0] = _runtime->_backbuffer_rtv[target_index].get();
-		pass.render_target_resources[0] = _runtime->_backbuffer_texture_srv[target_index].get();
+		pass.render_targets[0] = _runtime->_backbuffer_rtv[target_index];
+		pass.render_target_resources[0] = _runtime->_backbuffer_texture_srv[target_index];
 
 		for (unsigned int i = 0; i < 8; i++)
 		{
@@ -1707,7 +1809,7 @@ namespace reshade::d3d10
 				continue;
 			}
 
-			const auto texture = _runtime->find_texture(node->render_targets[i]->name);
+			const auto texture = _runtime->find_texture(node->render_targets[i]->unique_name);
 
 			if (texture == nullptr)
 			{
@@ -1745,8 +1847,8 @@ namespace reshade::d3d10
 				}
 			}
 
-			pass.render_targets[i] = texture_impl->rtv[target_index].get();
-			pass.render_target_resources[i] = texture_impl->srv[target_index].get();
+			pass.render_targets[i] = texture_impl->rtv[target_index];
+			pass.render_target_resources[i] = texture_impl->srv[target_index];
 		}
 
 		if (pass.viewport.Width == 0 && pass.viewport.Height == 0)
@@ -1783,6 +1885,8 @@ namespace reshade::d3d10
 		bdesc.BlendOpAlpha = static_cast<D3D10_BLEND_OP>(node->blend_op_alpha);
 		bdesc.SrcBlend = literal_to_blend_func(node->src_blend);
 		bdesc.DestBlend = literal_to_blend_func(node->dest_blend);
+		bdesc.SrcBlendAlpha = literal_to_blend_func(node->src_blend_alpha);
+		bdesc.DestBlendAlpha = literal_to_blend_func(node->dest_blend_alpha);
 
 		for (UINT i = 1; i < 8; i++)
 		{
@@ -1807,7 +1911,7 @@ namespace reshade::d3d10
 			com_ptr<ID3D10Resource> res1;
 			srv->GetResource(&res1);
 
-			for (auto rtv : pass.render_targets)
+			for (const auto &rtv : pass.render_targets)
 			{
 				if (rtv == nullptr)
 				{
@@ -1819,7 +1923,7 @@ namespace reshade::d3d10
 
 				if (res1 == res2)
 				{
-					srv = nullptr;
+					srv.reset();
 					break;
 				}
 			}
@@ -1896,6 +2000,20 @@ namespace reshade::d3d10
 		}
 
 		source += _global_code.str();
+
+#if RESHADE_DUMP_NATIVE_SHADERS
+		if (!_dumped_shaders.count(node->unique_name))
+		{
+			std::ofstream dumpfile(_dump_filename.string(), std::ios::app);
+
+			if (dumpfile.is_open())
+			{
+				dumpfile << "#ifdef RESHADE_SHADER_" << shadertype << "_" << node->unique_name << std::endl << source << "#endif" << std::endl << std::endl;
+
+				_dumped_shaders.insert(node->unique_name);
+			}
+		}
+#endif
 
 		UINT flags = D3DCOMPILE_ENABLE_STRICTNESS;
 		com_ptr<ID3DBlob> compiled, errors;

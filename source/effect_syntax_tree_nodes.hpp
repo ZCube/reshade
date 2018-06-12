@@ -47,6 +47,7 @@ namespace reshadefx
 		pass_declaration,
 		technique_declaration,
 	};
+
 	class node abstract
 	{
 		void operator=(const node &) = delete;
@@ -120,7 +121,7 @@ namespace reshadefx::nodes
 		int array_length;
 		struct struct_declaration_node *definition;
 	};
-	
+
 	struct expression_node abstract : public node
 	{
 		type_node type;
@@ -248,6 +249,8 @@ namespace reshadefx::nodes
 			frac,
 			frexp,
 			fwidth,
+			isinf,
+			isnan,
 			ldexp,
 			length,
 			lerp,
@@ -450,7 +453,6 @@ namespace reshadefx::nodes
 			reshade::texture_address_mode address_u = reshade::texture_address_mode::clamp;
 			reshade::texture_address_mode address_v = reshade::texture_address_mode::clamp;
 			reshade::texture_address_mode address_w = reshade::texture_address_mode::clamp;
-			unsigned int max_anisotropy = 1;
 			float min_lod, max_lod = FLT_MAX, lod_bias;
 		} properties;
 	};
@@ -500,9 +502,9 @@ namespace reshadefx::nodes
 
 			KEEP = 1,
 			REPLACE = 3,
-			INVERT,
 			INCRSAT,
 			DECRSAT,
+			INVERT,
 			INCR,
 			DECR,
 
@@ -522,7 +524,7 @@ namespace reshadefx::nodes
 		const function_declaration_node *vertex_shader, *pixel_shader;
 		bool clear_render_targets = true, srgb_write_enable, blend_enable, stencil_enable;
 		unsigned char color_write_mask = 0xF, stencil_read_mask = 0xFF, stencil_write_mask = 0xFF;
-		unsigned int blend_op = ADD, blend_op_alpha = ADD, src_blend = ONE, dest_blend = ZERO;
+		unsigned int blend_op = ADD, blend_op_alpha = ADD, src_blend = ONE, dest_blend = ZERO, src_blend_alpha = ONE, dest_blend_alpha = ZERO;
 		unsigned int stencil_comparison_func = ALWAYS, stencil_reference_value, stencil_op_pass = KEEP, stencil_op_fail = KEEP, stencil_op_depth_fail = KEEP;
 	};
 	struct technique_declaration_node : public declaration_node

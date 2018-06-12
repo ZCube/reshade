@@ -7,6 +7,7 @@
 #include "opengl_effect_compiler.hpp"
 #include <assert.h>
 #include <iomanip>
+#include <fstream>
 #include <algorithm>
 
 namespace reshade::opengl
@@ -154,7 +155,6 @@ namespace reshade::opengl
 				minfilter = GL_LINEAR_MIPMAP_NEAREST;
 				magfilter = GL_LINEAR;
 				break;
-			case reshade::texture_filter::anisotropic:
 			case reshade::texture_filter::min_mag_mip_linear:
 				minfilter = GL_LINEAR_MIPMAP_LINEAR;
 				magfilter = GL_LINEAR;
@@ -226,10 +226,19 @@ namespace reshade::opengl
 	{
 		std::string res;
 
-		if (name.compare(0, 3, "gl_") == 0 ||
-			name == "common" || name == "partition" || name == "input" || name == "ouput" || name == "active" || name == "filter" || name == "superp" ||
-			name == "invariant" || name == "lowp" || name == "mediump" || name == "highp" || name == "precision" || name == "patch" || name == "subroutine" ||
-			name == "abs" || name == "sign" || name == "all" || name == "any" || name == "sin" || name == "sinh" || name == "cos" || name == "cosh" || name == "tan" || name == "tanh" || name == "asin" || name == "acos" || name == "atan" || name == "exp" || name == "exp2" || name == "log" || name == "log2" || name == "sqrt" || name == "inversesqrt" || name == "ceil" || name == "floor" || name == "fract" || name == "trunc" || name == "round" || name == "radians" || name == "degrees" || name == "length" || name == "normalize" || name == "transpose" || name == "determinant" || name == "intBitsToFloat" || name == "uintBitsToFloat" || name == "floatBitsToInt" || name == "floatBitsToUint" || name == "matrixCompMult" || name == "not" || name == "lessThan" || name == "greaterThan" || name == "lessThanEqual" || name == "greaterThanEqual" || name == "equal" || name == "notEqual" || name == "dot" || name == "cross" || name == "distance" || name == "pow" || name == "modf" || name == "frexp" || name == "ldexp" || name == "min" || name == "max" || name == "step" || name == "reflect" || name == "texture" || name == "textureOffset" || name == "fma" || name == "mix" || name == "clamp" || name == "smoothstep" || name == "refract" || name == "faceforward" || name == "textureLod" || name == "textureLodOffset" || name == "texelFetch" || name == "main")
+		static const std::unordered_set<std::string> s_reserverd_names = {
+			"common", "partition", "input", "ouput", "active", "filter", "superp", "invariant",
+			"lowp", "mediump", "highp", "precision", "patch", "subroutine",
+			"abs", "sign", "all", "any", "sin", "sinh", "cos", "cosh", "tan", "tanh", "asin", "acos", "atan",
+			"exp", "exp2", "log", "log2", "sqrt", "inversesqrt", "ceil", "floor", "fract", "trunc", "round",
+			"radians", "degrees", "length", "normalize", "transpose", "determinant", "intBitsToFloat", "uintBitsToFloat",
+			"floatBitsToInt", "floatBitsToUint", "matrixCompMult", "not", "lessThan", "greaterThan", "lessThanEqual",
+			"greaterThanEqual", "equal", "notEqual", "dot", "cross", "distance", "pow", "modf", "frexp", "ldexp",
+			"min", "max", "step", "reflect", "texture", "textureOffset", "fma", "mix", "clamp", "smoothstep", "refract",
+			"faceforward", "textureLod", "textureLodOffset", "texelFetch", "main"
+		};
+
+		if (name.compare(0, 3, "gl_") == 0 || s_reserverd_names.count(name))
 		{
 			res += '_';
 		}
@@ -367,6 +376,14 @@ namespace reshade::opengl
 		_errors(errors),
 		_current_function(nullptr)
 	{
+#if RESHADE_DUMP_NATIVE_SHADERS
+		if (_ast.techniques.size() == 0)
+			return;
+		_dump_filename = _ast.techniques[0]->location.source;
+		_dump_filename = "ReShade-ShaderDump-" + _dump_filename.filename_without_extension().string() + ".glsl";
+
+		std::ofstream(_dump_filename.string(), std::ios::trunc);
+#endif
 	}
 
 	bool opengl_effect_compiler::run()
@@ -394,7 +411,7 @@ namespace reshade::opengl
 			}
 			else
 			{
-				visit(_global_code, uniform);
+				visit(_global_code, uniform, true, true, false);
 
 				_global_code << ";\n";
 			}
@@ -429,7 +446,7 @@ namespace reshade::opengl
 
 			glBindBuffer(GL_UNIFORM_BUFFER, previous);
 
-			_runtime->_effect_ubos.push_back(std::make_pair(ubo, _uniform_buffer_size));
+			_runtime->_effect_ubos.emplace_back(ubo, _uniform_buffer_size);
 		}
 
 		return _success;
@@ -536,28 +553,35 @@ namespace reshade::opengl
 		}
 	}
 
-	void opengl_effect_compiler::visit(std::stringstream &output, const type_node &type, bool with_qualifiers)
+	void opengl_effect_compiler::visit(std::stringstream &output, const type_node &type, bool with_qualifiers, bool with_inout)
 	{
-		if (with_qualifiers)
+		if (with_inout)
 		{
-			if (type.has_qualifier(type_node::qualifier_linear))
-				output << "smooth ";
-			if (type.has_qualifier(type_node::qualifier_noperspective))
-				output << "noperspective ";
-			if (type.has_qualifier(type_node::qualifier_centroid))
-				output << "centroid ";
-			if (type.has_qualifier(type_node::qualifier_nointerpolation))
-				output << "flat ";
+			if (with_qualifiers)
+			{
+				if (type.has_qualifier(type_node::qualifier_nointerpolation))
+					output << "flat ";
+				if (type.has_qualifier(type_node::qualifier_noperspective))
+					output << "noperspective ";
+				if (type.has_qualifier(type_node::qualifier_linear))
+					output << "smooth ";
+				if (type.has_qualifier(type_node::qualifier_centroid))
+					output << "centroid ";
+			}
+
 			if (type.has_qualifier(type_node::qualifier_inout))
 				output << "inout ";
 			else if (type.has_qualifier(type_node::qualifier_in))
 				output << "in ";
 			else if (type.has_qualifier(type_node::qualifier_out))
 				output << "out ";
-			else if (type.has_qualifier(type_node::qualifier_uniform))
-				output << "uniform ";
+		}
+		else if (with_qualifiers)
+		{
 			if (type.has_qualifier(type_node::qualifier_const))
 				output << "const ";
+			else if (type.has_qualifier(type_node::qualifier_uniform))
+				output << "uniform ";
 		}
 
 		switch (type.basetype)
@@ -613,7 +637,12 @@ namespace reshade::opengl
 	{
 		if (!node->type.is_scalar())
 		{
-			visit(output, node->type, false);
+			if (node->type.is_matrix())
+			{
+				output << "transpose(";
+			}
+
+			visit(output, node->type, false, false);
 
 			output << '(';
 		}
@@ -644,6 +673,11 @@ namespace reshade::opengl
 
 		if (!node->type.is_scalar())
 		{
+			if (node->type.is_matrix())
+			{
+				output << ')';
+			}
+
 			output << ')';
 		}
 	}
@@ -692,7 +726,7 @@ namespace reshade::opengl
 				output << "--";
 				break;
 			case unary_expression_node::cast:
-				visit(output, node->type, false);
+				visit(output, node->type, false, false);
 				output << '(';
 				break;
 		}
@@ -986,92 +1020,56 @@ namespace reshade::opengl
 					output << ')';
 				}
 				break;
-			case intrinsic_expression_node::bitcast_int2float:
-				output << "intBitsToFloat(";
-
-				if (type1.basetype != type_node::datatype_int)
-				{
-					type1.basetype = type_node::datatype_int;
-					visit(output, type1, false);
-					output << '(';
-				}
-
-				visit(output, node->arguments[0]);
-
-				if (type1.basetype != type_node::datatype_int)
-				{
-					output << ')';
-				}
-
-				output << ')';
-				break;
-			case intrinsic_expression_node::bitcast_uint2float:
-				output << "uintBitsToFloat(";
-
-				if (type1.basetype != type_node::datatype_uint)
-				{
-					type1.basetype = type_node::datatype_uint;
-					visit(output, type1, false);
-					output << '(';
-				}
-
-				visit(output, node->arguments[0]);
-
-				if (type1.basetype != type_node::datatype_uint)
-				{
-					output << ')';
-				}
-
-				output << ')';
-				break;
 			case intrinsic_expression_node::asin:
 				output << "asin(" << cast1.first;
 				visit(output, node->arguments[0]);
 				output << cast1.second << ')';
-				break;
-			case intrinsic_expression_node::bitcast_float2int:
-				output << "floatBitsToInt(";
-
-				if (!type1.is_floating_point())
-				{
-					type1.basetype = type_node::datatype_float;
-					visit(output, type1, false);
-					output << '(';
-				}
-
-				visit(output, node->arguments[0]);
-
-				if (!type1.is_floating_point())
-				{
-					output << ')';
-				}
-
-				output << ')';
-				break;
-			case intrinsic_expression_node::bitcast_float2uint:
-				output << "floatBitsToUint(";
-
-				if (!type1.is_floating_point())
-				{
-					type1.basetype = type_node::datatype_float;
-					visit(output, type1, false);
-					output << '(';
-				}
-
-				visit(output, node->arguments[0]);
-
-				if (!type1.is_floating_point())
-				{
-					output << ')';
-				}
-
-				output << ')';
 				break;
 			case intrinsic_expression_node::atan:
 				output << "atan(" << cast1.first;
 				visit(output, node->arguments[0]);
 				output << cast1.second << ')';
 				break;
+			case intrinsic_expression_node::bitcast_int2float:
+			{
+				const type_node type1to = { type_node::datatype_int, 0, type1.rows, type1.cols };
+				cast1 = write_cast(type1, type1to);
+
+				output << "intBitsToFloat(" << cast1.first;
+				visit(output, node->arguments[0]);
+				output << cast1.second << ')';
+				break;
+			}
+			case intrinsic_expression_node::bitcast_uint2float:
+			{
+				const type_node type1to = { type_node::datatype_uint, 0, type1.rows, type1.cols };
+				cast1 = write_cast(type1, type1to);
+
+				output << "uintBitsToFloat(" << cast1.first;
+				visit(output, node->arguments[0]);
+				output << cast1.second << ')';
+				break;
+			}
+			case intrinsic_expression_node::bitcast_float2int:
+			{
+				const type_node type1to = { type_node::datatype_float, 0, type1.rows, type1.cols };
+				cast1 = write_cast(type1, type1to);
+
+				output << "floatBitsToInt(" << cast1.first;
+				visit(output, node->arguments[0]);
+				output << cast1.second << ')';
+				break;
+			}
+			case intrinsic_expression_node::bitcast_float2uint:
+			{
+				const type_node type1to = { type_node::datatype_float, 0, type1.rows, type1.cols };
+				cast1 = write_cast(type1, type1to);
+
+				output << "floatBitsToUint(" << cast1.first;
+				visit(output, node->arguments[0]);
+				output << cast1.second << ')';
+				break;
+			}
 			case intrinsic_expression_node::atan2:
 				output << "atan(" << cast1.first;
 				visit(output, node->arguments[0]);
@@ -1126,24 +1124,15 @@ namespace reshade::opengl
 				output << cast1.second << ')';
 				break;
 			case intrinsic_expression_node::determinant:
-				output << "determinant(";
+			{
+				const type_node type1to = { type_node::datatype_float, 0, type1.rows, type1.cols };
+				cast1 = write_cast(type1, type1to);
 
-				if (!type1.is_floating_point())
-				{
-					type1.basetype = type_node::datatype_float;
-					visit(output, type1, false);
-					output << '(';
-				}
-
+				output << "determinant(" << cast1.first;
 				visit(output, node->arguments[0]);
-
-				if (!type1.is_floating_point())
-				{
-					output << ')';
-				}
-
-				output << ')';
+				output << cast1.second << ')';
 				break;
+			}
 			case intrinsic_expression_node::distance:
 				output << "distance(" << cast121.first;
 				visit(output, node->arguments[0]);
@@ -1199,32 +1188,38 @@ namespace reshade::opengl
 				visit(output, node->arguments[0]);
 				output << cast1.second << ')';
 				break;
+			case intrinsic_expression_node::isinf:
+				output << "isinf(" << cast1.first;
+				visit(output, node->arguments[0]);
+				output << cast1.second << ')';
+				break;
+			case intrinsic_expression_node::isnan:
+				output << "isnan(" << cast1.first;
+				visit(output, node->arguments[0]);
+				output << cast1.second << ')';
+				break;
 			case intrinsic_expression_node::ldexp:
+			{
+				const type_node type2to = { type_node::datatype_int, 0, type1.rows, type1.cols };
+				cast2 = write_cast(type2, type2to);
+
 				output << "ldexp(" << cast1.first;
 				visit(output, node->arguments[0]);
 				output << cast1.second << ", " << cast2.first;
 				visit(output, node->arguments[1]);
 				output << cast2.second << ')';
 				break;
+			}
 			case intrinsic_expression_node::length:
-				output << "length(";
+			{
+				const type_node type1to = { type_node::datatype_float, 0, type1.rows, type1.cols };
+				cast1 = write_cast(type1, type1to);
 
-				if (!type1.is_floating_point())
-				{
-					type1.basetype = type_node::datatype_float;
-					visit(output, type1, false);
-					output << '(';
-				}
-
+				output << "length(" << cast1.first;
 				visit(output, node->arguments[0]);
-
-				if (!type1.is_floating_point())
-				{
-					output << ')';
-				}
-
-				output << ')';
+				output << cast1.second << ')';
 				break;
+			}
 			case intrinsic_expression_node::lerp:
 				output << "mix(" << cast1.first;
 				visit(output, node->arguments[0]);
@@ -1243,7 +1238,7 @@ namespace reshade::opengl
 				output << "(log2(" << cast1.first;
 				visit(output, node->arguments[0]);
 				output << cast1.second << ") / ";
-				visit(output, node->type, false);
+				visit(output, node->type, false, false);
 				output << "(2.302585093))";
 				break;
 			case intrinsic_expression_node::log2:
@@ -1289,23 +1284,9 @@ namespace reshade::opengl
 				output << ')';
 				break;
 			case intrinsic_expression_node::normalize:
-				output << "normalize(";
-
-				if (!type1.is_floating_point())
-				{
-					type1.basetype = type_node::datatype_float;
-					visit(output, type1, false);
-					output << '(';
-				}
-
+				output << "normalize(" << cast1.first;
 				visit(output, node->arguments[0]);
-
-				if (!type1.is_floating_point())
-				{
-					output << ')';
-				}
-
-				output << ')';
+				output << cast1.second << ')';
 				break;
 			case intrinsic_expression_node::pow:
 				output << "pow(" << cast1.first;
@@ -1321,7 +1302,7 @@ namespace reshade::opengl
 				break;
 			case intrinsic_expression_node::rcp:
 				output << '(';
-				visit(output, node->type, false);
+				visit(output, node->type, false, false);
 				output << "(1.0) / ";
 				visit(output, node->arguments[0]);
 				output << ')';
@@ -1368,28 +1349,19 @@ namespace reshade::opengl
 				output << cast1.second << ')';
 				break;
 			case intrinsic_expression_node::sincos:
-				output << "_sincos(";
+			{
+				const type_node type1to = { type_node::datatype_float, 0, type1.rows, type1.cols };
+				cast1 = write_cast(type1, type1to);
 
-				if (!type1.is_floating_point())
-				{
-					type1.basetype = type_node::datatype_float;
-					visit(output, type1, false);
-					output << '(';
-				}
-
+				output << "_sincos(" << cast1.first;
 				visit(output, node->arguments[0]);
-
-				if (!type1.is_floating_point())
-				{
-					output << ')';
-				}
-
-				output << ", ";
+				output << cast1.second << ", ";
 				visit(output, node->arguments[1]);
 				output << ", ";
 				visit(output, node->arguments[2]);
 				output << ')';
 				break;
+			}
 			case intrinsic_expression_node::sinh:
 				output << "sinh(" << cast1.first;
 				visit(output, node->arguments[0]);
@@ -1447,7 +1419,7 @@ namespace reshade::opengl
 				visit(output, node->arguments[0]);
 				output << ", " << cast2.first;
 				visit(output, node->arguments[1]);
-				output << cast2.second << " * ivec2(1, -1) + ivec2(0, 1))";
+				output << cast2.second << ")";
 				break;
 			}
 			case intrinsic_expression_node::texture_gather:
@@ -1564,22 +1536,9 @@ namespace reshade::opengl
 				output << "))";
 				break;
 			case intrinsic_expression_node::transpose:
-				output << "transpose(";
-
-				if (!type1.is_floating_point())
-				{
-					type1.basetype = type_node::datatype_float;
-					visit(output, type1, false);
-					output << '(';
-				}
-
+				output << "transpose(" << cast1.first;
 				visit(output, node->arguments[0]);
-				output << ')';
-
-				if (!type1.is_floating_point())
-				{
-					output << ')';
-				}
+				output << cast1.second << ')';
 				break;
 			case intrinsic_expression_node::trunc:
 				output << "trunc(" << cast1.first;
@@ -1748,7 +1707,7 @@ namespace reshade::opengl
 			output << "transpose(";
 		}
 
-		visit(output, node->type, false);
+		visit(output, node->type, false, false);
 		output << '(';
 
 		for (size_t i = 0, count = node->arguments.size(); i < count; i++)
@@ -1774,7 +1733,7 @@ namespace reshade::opengl
 	}
 	void opengl_effect_compiler::visit(std::stringstream &output, const initializer_list_node *node, const type_node &type)
 	{
-		visit(output, type, false);
+		visit(output, type, false, false);
 
 		output << "[](";
 
@@ -1820,7 +1779,7 @@ namespace reshade::opengl
 
 		for (size_t i = 0, count = node->declarator_list.size(); i < count; i++)
 		{
-			visit(output, node->declarator_list[i], with_type);
+			visit(output, node->declarator_list[i], with_type, true, false);
 
 			if (i < count - 1)
 			{
@@ -2023,7 +1982,7 @@ namespace reshade::opengl
 		{
 			for (auto field : node->field_list)
 			{
-				visit(output, field);
+				visit(output, field, true, true, false);
 
 				output << ";\n";
 			}
@@ -2035,11 +1994,11 @@ namespace reshade::opengl
 
 		output << "};\n";
 	}
-	void opengl_effect_compiler::visit(std::stringstream &output, const variable_declaration_node *node, bool with_type)
+	void opengl_effect_compiler::visit(std::stringstream &output, const variable_declaration_node *node, bool with_type, bool with_qualifiers, bool with_inout)
 	{
 		if (with_type)
 		{
-			visit(output, node->type);
+			visit(output, node->type, with_qualifiers, with_inout);
 			output << ' ';
 		}
 
@@ -2079,13 +2038,13 @@ namespace reshade::opengl
 	{
 		_current_function = node;
 
-		visit(output, node->return_type, false);
+		visit(output, node->return_type, false, false);
 
 		output << ' ' << escape_name(node->unique_name) << '(';
 
 		for (size_t i = 0, count = node->parameter_list.size(); i < count; i++)
 		{
-			visit(output, node->parameter_list[i]);
+			visit(output, node->parameter_list[i], true, false, true);
 
 			if (i < count - 1)
 			{
@@ -2102,6 +2061,21 @@ namespace reshade::opengl
 
 	void opengl_effect_compiler::visit_texture(const variable_declaration_node *node)
 	{
+		const auto existing_texture = _runtime->find_texture(node->unique_name);
+
+		if (existing_texture != nullptr)
+		{
+			if (node->semantic.empty() && (
+				existing_texture->width != node->properties.width ||
+				existing_texture->height != node->properties.height ||
+				existing_texture->levels != node->properties.levels ||
+				existing_texture->format != node->properties.format))
+			{
+				error(node->location, existing_texture->effect_filename + " already created a texture with the same name but different dimensions; textures are shared across all effects, so either rename the variable or adjust the dimensions so they match");
+			}
+			return;
+		}
+
 		texture obj;
 		obj.impl = std::make_unique<opengl_tex_data>();
 		const auto obj_data = obj.impl->as<opengl_tex_data>();
@@ -2122,6 +2096,11 @@ namespace reshade::opengl
 		else if (node->semantic == "DEPTH" || node->semantic == "SV_DEPTH")
 		{
 			_runtime->update_texture_reference(obj, texture_reference::depth_buffer);
+		}
+		else if (!node->semantic.empty())
+		{
+			error(node->location, "invalid semantic");
+			return;
 		}
 		else
 		{
@@ -2151,7 +2130,7 @@ namespace reshade::opengl
 	}
 	void opengl_effect_compiler::visit_sampler(const variable_declaration_node *node)
 	{
-		const auto texture = _runtime->find_texture(node->properties.texture->name);
+		const auto texture = _runtime->find_texture(node->properties.texture->unique_name);
 
 		if (texture == nullptr)
 		{
@@ -2172,12 +2151,11 @@ namespace reshade::opengl
 		glSamplerParameteri(sampler.id, GL_TEXTURE_WRAP_S, literal_to_wrap_mode(node->properties.address_u));
 		glSamplerParameteri(sampler.id, GL_TEXTURE_WRAP_T, literal_to_wrap_mode(node->properties.address_v));
 		glSamplerParameteri(sampler.id, GL_TEXTURE_WRAP_R, literal_to_wrap_mode(node->properties.address_w));
-		glSamplerParameteri(sampler.id, GL_TEXTURE_MIN_FILTER, minfilter);
 		glSamplerParameteri(sampler.id, GL_TEXTURE_MAG_FILTER, magfilter);
+		glSamplerParameteri(sampler.id, GL_TEXTURE_MIN_FILTER, minfilter);
 		glSamplerParameterf(sampler.id, GL_TEXTURE_LOD_BIAS, node->properties.lod_bias);
 		glSamplerParameterf(sampler.id, GL_TEXTURE_MIN_LOD, node->properties.min_lod);
 		glSamplerParameterf(sampler.id, GL_TEXTURE_MAX_LOD, node->properties.max_lod);
-		glSamplerParameterf(sampler.id, 0x84FE /* GL_TEXTURE_MAX_ANISOTROPY_EXT */, static_cast<GLfloat>(node->properties.max_anisotropy));
 
 		_global_code << "layout(binding = " << _runtime->_effect_samplers.size() << ") uniform sampler2D " << escape_name(node->unique_name) << ";\n";
 
@@ -2185,7 +2163,7 @@ namespace reshade::opengl
 	}
 	void opengl_effect_compiler::visit_uniform(const variable_declaration_node *node)
 	{
-		visit(_global_uniforms, node->type, true);
+		visit(_global_uniforms, node->type, true, false);
 
 		_global_uniforms << ' ' << escape_name(node->unique_name);
 
@@ -2228,7 +2206,7 @@ namespace reshade::opengl
 
 		auto &uniform_storage = _runtime->get_uniform_value_storage();
 
-		if (_uniform_storage_offset + _uniform_buffer_size >= uniform_storage.size())
+		if (_uniform_storage_offset + _uniform_buffer_size >= static_cast<ptrdiff_t>(uniform_storage.size()))
 		{
 			uniform_storage.resize(uniform_storage.size() + 128);
 		}
@@ -2247,8 +2225,12 @@ namespace reshade::opengl
 	void opengl_effect_compiler::visit_technique(const technique_declaration_node *node)
 	{
 		technique obj;
+		obj.impl = std::make_unique<opengl_technique_data>();
 		obj.name = node->name;
 		obj.annotations = node->annotation_list;
+
+		const auto obj_data = obj.impl->as<opengl_technique_data>();
+		glGenQueries(1, &obj_data->query);
 
 		if (_uniform_buffer_size != 0)
 		{
@@ -2282,6 +2264,8 @@ namespace reshade::opengl
 		pass.blend_eq_alpha = literal_to_blend_eq(node->blend_op_alpha);
 		pass.blend_src = literal_to_blend_func(node->src_blend);
 		pass.blend_dest = literal_to_blend_func(node->dest_blend);
+		pass.blend_src_alpha = literal_to_blend_func(node->src_blend_alpha);
+		pass.blend_dest_alpha = literal_to_blend_func(node->dest_blend_alpha);
 		pass.stencil_reference = node->stencil_reference_value;
 		pass.srgb = node->srgb_write_enable;
 		pass.clear_render_targets = node->clear_render_targets;
@@ -2298,7 +2282,7 @@ namespace reshade::opengl
 				continue;
 			}
 
-			const auto texture = _runtime->find_texture(node->render_targets[i]->name);
+			const auto texture = _runtime->find_texture(node->render_targets[i]->unique_name);
 
 			if (texture == nullptr)
 			{
@@ -2386,6 +2370,7 @@ namespace reshade::opengl
 			glGetProgramInfoLog(pass.program, logsize, nullptr, &log.front());
 
 			glDeleteProgram(pass.program);
+			pass.program = 0;
 
 			_errors += log;
 			error(node->location, "program linking failed");
@@ -2410,7 +2395,7 @@ namespace reshade::opengl
 			"void _sincos(vec3 x, out vec3 s, out vec3 c) { s = sin(x), c = cos(x); }"
 			"void _sincos(vec4 x, out vec4 s, out vec4 c) { s = sin(x), c = cos(x); }\n"
 			"vec4 _textureLod(sampler2D s, vec4 c) { return textureLod(s, c.xy, c.w); }\n"
-			"vec4 _texelFetch(sampler2D s, ivec4 c) { return texelFetch(s, c.xy, c.w); }\n"
+			"vec4 _texelFetch(sampler2D s, ivec4 c) { return texelFetch(s, c.xy - ivec2(vec2(0, 1.0 - 1.0 / exp2(float(c.w))) * textureSize(s, 0)), c.w); }\n"
 			"#define _textureLodOffset(s, c, offset) textureLodOffset(s, (c).xy, (c).w, offset)\n";
 
 		if (_uniform_buffer_size != 0)
@@ -2438,7 +2423,7 @@ namespace reshade::opengl
 			{
 				for (auto field : parameter->type.definition->field_list)
 				{
-					visit_shader_param(source, field->type, parameter->type.qualifiers, "_param_" + parameter->name + "_" + field->name, field->semantic, shadertype);
+					visit_shader_param(source, field->type, parameter->type.qualifiers | field->type.qualifiers, "_param_" + parameter->name + "_" + field->name, field->semantic, shadertype);
 				}
 			}
 			else
@@ -2467,7 +2452,7 @@ namespace reshade::opengl
 			{
 				if (parameter->type.is_struct())
 				{
-					visit(source, parameter->type, false);
+					visit(source, parameter->type, false, false);
 
 					source << " _param_" << parameter->name;
 
@@ -2478,7 +2463,7 @@ namespace reshade::opengl
 
 					source << " = ";
 
-					visit(source, parameter->type, false);
+					visit(source, parameter->type, false, false);
 
 					source << '(';
 
@@ -2501,7 +2486,7 @@ namespace reshade::opengl
 					parameter->semantic.compare(0, 9, "SV_TARGET") == 0)
 				{
 					source << " _param_" << parameter->name;
-					
+
 					if (parameter->type.is_array())
 					{
 						source << i;
@@ -2513,11 +2498,11 @@ namespace reshade::opengl
 
 			if (parameter->type.is_array())
 			{
-				visit(source, parameter->type, false);
+				visit(source, parameter->type, false, false);
 
 				source << " _param_" << parameter->name << "[] = ";
 
-				visit(source, parameter->type, false);
+				visit(source, parameter->type, false, false);
 
 				source << "[](";
 
@@ -2537,7 +2522,7 @@ namespace reshade::opengl
 
 		if (node->return_type.is_struct())
 		{
-			visit(source, node->return_type, false);
+			visit(source, node->return_type, false, false);
 
 			source << ' ';
 		}
@@ -2553,6 +2538,19 @@ namespace reshade::opengl
 				const std::string swizzle[3] = { "x", "xy", "xyz" };
 
 				source << "vec4(0, 0, 0, 1);\n_return." << swizzle[node->return_type.rows - 1] << " = ";
+
+				if (node->return_type.is_vector())
+				{
+					source << "vec" << node->return_type.rows << '(';
+				}
+				else
+				{
+					source << "float(";
+				}
+			}
+			else
+			{
+				source << '(';
 			}
 		}
 
@@ -2579,7 +2577,14 @@ namespace reshade::opengl
 			}
 		}
 
-		source << ");\n";
+		source << ')';
+
+		if (!node->return_type.is_void())
+		{
+			source << ')';
+		}
+
+		source << ";\n";
 
 		for (auto parameter : node->parameter_list)
 		{
@@ -2630,7 +2635,7 @@ namespace reshade::opengl
 			}
 		}
 
-		if (shadertype == GL_VERTEX_SHADER && gl3wClipControl == nullptr)
+		if (shadertype == GL_VERTEX_SHADER && gl3wProcs.gl.ClipControl == nullptr)
 		{
 			source << "gl_Position = gl_Position * vec4(1.0, 1.0, 2.0, 1.0) + vec4(0.0, 0.0, -gl_Position.w, 0.0);\n";
 		}
@@ -2641,6 +2646,20 @@ namespace reshade::opengl
 		const std::string source_str = source.str();
 		const GLchar *src = source_str.c_str();
 		const GLsizei len = static_cast<GLsizei>(source_str.size());
+
+#if RESHADE_DUMP_NATIVE_SHADERS
+		if (!_dumped_shaders.count(node->unique_name))
+		{
+			std::ofstream dumpfile(_dump_filename.string(), std::ios::app);
+
+			if (dumpfile.is_open())
+			{
+				dumpfile << "#ifdef RESHADE_SHADER_" << shadertype << "_" << node->unique_name << std::endl << source_str << "#endif" << std::endl << std::endl;
+
+				_dumped_shaders.insert(node->unique_name);
+			}
+		}
+#endif
 
 		glShaderSource(shader, 1, &src, &len);
 		glCompileShader(shader);
@@ -2661,6 +2680,12 @@ namespace reshade::opengl
 	void opengl_effect_compiler::visit_shader_param(std::stringstream &output, type_node type, unsigned int qualifier, const std::string &name, const std::string &semantic, unsigned int shadertype)
 	{
 		type.qualifiers = static_cast<unsigned int>(qualifier);
+
+		// OpenGL does not allow varying of type boolean
+		if (type.basetype == type_node::datatype_bool)
+		{
+			type.basetype = type_node::datatype_float;
+		}
 
 		unsigned long location = 0;
 
@@ -2689,7 +2714,7 @@ namespace reshade::opengl
 
 			output << "layout(location = " << (location + i) << ") ";
 
-			visit(output, type, true);
+			visit(output, type, true, true);
 
 			output << ' ' + name;
 
