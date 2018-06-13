@@ -927,15 +927,8 @@ namespace reshade
 
 		_imgui_context->IO.IniFilename = _save_imgui_window_state ? "ReShadeGUI.ini" : nullptr;
 		auto &imgui_io = _imgui_context->IO;
-		float global_scale;
-		config.get("GENERAL", "FontGlobalScale", global_scale);
-		imgui_io.FontGlobalScale = global_scale;
-
 		auto &imgui_style = _imgui_context->Style;
-		float global_alpha;
-		config.get("STYLE", "Alpha", global_alpha);
-		imgui_style.Alpha = global_alpha;
-
+    
 		config.get("STYLE", "Alpha", _imgui_context->Style.Alpha);
 		config.get("STYLE", "ColBackground", _imgui_col_background);
 		config.get("STYLE", "ColItemBackground", _imgui_col_item_background);
