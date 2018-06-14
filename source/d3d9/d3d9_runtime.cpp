@@ -967,8 +967,12 @@ namespace reshade::d3d9
 					static_cast<LONG>(cmd->ClipRect.w)
 				};
 
-				_device->SetTexture(0, static_cast<const d3d9_tex_data *>(cmd->TextureId)->texture.get());
-				_device->SetScissorRect(&scissor_rect);
+				auto tex_data = static_cast<const d3d9_tex_data *>(cmd->TextureId);
+				if (tex_data)
+				{
+					_device->SetTexture(0, tex_data->texture.get());
+					_device->SetScissorRect(&scissor_rect);
+				}
 
 				_device->DrawIndexedPrimitive(D3DPT_TRIANGLELIST, vtx_offset, 0, cmd_list->VtxBuffer.size(), idx_offset, cmd->ElemCount / 3);
 			}

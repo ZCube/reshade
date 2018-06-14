@@ -1161,9 +1161,13 @@ namespace reshade::d3d10
 					static_cast<LONG>(cmd->ClipRect.w)
 				};
 
-				ID3D10ShaderResourceView *const texture_view = static_cast<const d3d10_tex_data *>(cmd->TextureId)->srv[0].get();
-				_device->PSSetShaderResources(0, 1, &texture_view);
-				_device->RSSetScissorRects(1, &scissor_rect);
+				auto tex_data = static_cast<const d3d10_tex_data *>(cmd->TextureId);
+				if (tex_data)
+				{
+					ID3D10ShaderResourceView *const texture_view = tex_data->srv[0].get();
+					_device->PSSetShaderResources(0, 1, &texture_view);
+					_device->RSSetScissorRects(1, &scissor_rect);
+				}
 
 				_device->DrawIndexed(cmd->ElemCount, idx_offset, vtx_offset);
 			}

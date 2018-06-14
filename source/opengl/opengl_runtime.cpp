@@ -917,8 +917,12 @@ namespace reshade::opengl
 					static_cast<GLint>(_height - cmd->ClipRect.w),
 					static_cast<GLint>(cmd->ClipRect.z - cmd->ClipRect.x),
 					static_cast<GLint>(cmd->ClipRect.w - cmd->ClipRect.y));
-				glBindTexture(GL_TEXTURE_2D, static_cast<const opengl_tex_data *>(cmd->TextureId)->id[0]);
 
+				auto tex_data = static_cast<const opengl_tex_data *>(cmd->TextureId);
+				if (tex_data)
+				{
+					glBindTexture(GL_TEXTURE_2D, tex_data->id[0]);
+				}
 				glDrawElements(GL_TRIANGLES, cmd->ElemCount, sizeof(ImDrawIdx) == 2 ? GL_UNSIGNED_SHORT : GL_UNSIGNED_INT, idx_buffer_offset);
 			}
 		}
