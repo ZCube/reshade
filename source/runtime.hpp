@@ -32,6 +32,10 @@ namespace reshadefx
 extern volatile long g_network_traffic;
 #pragma endregion
 
+/////////////////////////////////////////////////////////////////////////////////
+#include "mod.hpp"
+/////////////////////////////////////////////////////////////////////////////////
+
 namespace reshade
 {
 	class runtime abstract
@@ -235,6 +239,9 @@ namespace reshade
 		std::vector<technique> _techniques;
 
 		/////////////////////////////////////////////////////////////////////////////////
+		typedef ModInterface* (*TModCreate)();
+		typedef int(*TModFree)(ModInterface* context);
+
 		typedef int(*TModUnInit)(ImGuiContext* context);
 		typedef int(*TModRender)(ImGuiContext* context);
 		typedef int(*TModInit)(ImGuiContext* context);
@@ -246,16 +253,19 @@ namespace reshade
 		typedef bool(*TModUpdateFont)(ImGuiContext* context);
 		typedef bool(*TModMenu)(bool* show);
 
-		TModUnInit modUnInit = nullptr;
-		TModRender modRender = nullptr;
-		TModInit modInit = nullptr;
-		TModTextureData modTextureData = nullptr;
-		TModGetTextureDirtyRect modGetTextureDirtyRect = nullptr;
-		TModSetTexture modSetTexture = nullptr;
-		TModTextureBegin modTextureBegin = nullptr;
-		TModTextureEnd modTextureEnd = nullptr;
-		TModUpdateFont modUpdateFont = nullptr;
-		TModMenu modMenu = nullptr;
+		ModInterface* modInterface = nullptr;
+		TModCreate modCreate = nullptr;
+		TModFree  modFree = nullptr;
+		//TModUnInit modUnInit = nullptr;
+		//TModRender modRender = nullptr;
+		//TModInit modInit = nullptr;
+		//TModTextureData modTextureData = nullptr;
+		//TModGetTextureDirtyRect modGetTextureDirtyRect = nullptr;
+		//TModSetTexture modSetTexture = nullptr;
+		//TModTextureBegin modTextureBegin = nullptr;
+		//TModTextureEnd modTextureEnd = nullptr;
+		//TModUpdateFont modUpdateFont = nullptr;
+		//TModMenu modMenu = nullptr;
 		HMODULE mod;
 		std::vector<std::unique_ptr<base_object> > _imgui_mod_atlas_textures;
 		virtual bool init_imgui_font_atlas() = 0;

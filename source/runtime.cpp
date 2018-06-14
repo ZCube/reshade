@@ -121,20 +121,26 @@ namespace reshade
 		}
 		if (mod)
 		{
-			modInit = (TModInit)GetProcAddress(mod, "ModInit");
-			modRender = (TModRender)GetProcAddress(mod, "ModRender");
-			modUnInit = (TModUnInit)GetProcAddress(mod, "ModUnInit");
-			modTextureData = (TModTextureData)GetProcAddress(mod, "ModTextureData");
-			modSetTexture = (TModSetTexture)GetProcAddress(mod, "ModSetTexture");
-			modGetTextureDirtyRect = (TModGetTextureDirtyRect)GetProcAddress(mod, "ModGetTextureDirtyRect");
-			modTextureBegin = (TModTextureBegin)GetProcAddress(mod, "ModTextureBegin");
-			modTextureEnd = (TModTextureEnd)GetProcAddress(mod, "ModTextureEnd");
-			modUpdateFont = (TModUpdateFont)GetProcAddress(mod, "ModUpdateFont");
-			modMenu = (TModMenu)GetProcAddress(mod, "ModMenu");
+			modCreate = (TModCreate)GetProcAddress(mod, "ModCreate");
+			modFree = (TModFree)GetProcAddress(mod, "ModFree");
+
+			if (modCreate && modFree) {
+				modInterface = modCreate();
+			}
+			//modInit = (TModInit)GetProcAddress(mod, "ModInit");
+			//modRender = (TModRender)GetProcAddress(mod, "ModRender");
+			//modUnInit = (TModUnInit)GetProcAddress(mod, "ModUnInit");
+			//modTextureData = (TModTextureData)GetProcAddress(mod, "ModTextureData");
+			//modSetTexture = (TModSetTexture)GetProcAddress(mod, "ModSetTexture");
+			//modGetTextureDirtyRect = (TModGetTextureDirtyRect)GetProcAddress(mod, "ModGetTextureDirtyRect");
+			//modTextureBegin = (TModTextureBegin)GetProcAddress(mod, "ModTextureBegin");
+			//modTextureEnd = (TModTextureEnd)GetProcAddress(mod, "ModTextureEnd");
+			//modUpdateFont = (TModUpdateFont)GetProcAddress(mod, "ModUpdateFont");
+			//modMenu = (TModMenu)GetProcAddress(mod, "ModMenu");
 		}
-		if (modInit)
+		if (modInterface)
 		{
-			modInit(ImGui::GetCurrentContext());
+			modInterface->Init(ImGui::GetCurrentContext());
 		}
 		/////////////////////////////////////////////////////////////////////////////////
 
@@ -155,19 +161,11 @@ namespace reshade
 	runtime::~runtime()
 	{
 /////////////////////////////////////////////////////////////////////////////////
-		if (modUnInit)
+		if (modInterface)
 		{
-			modUnInit(ImGui::GetCurrentContext());
-		}
-		if (mod)
-		{
-			modInit = nullptr;
-			modRender = nullptr;
-			modUnInit = nullptr;
-			modTextureData = nullptr;
-			modSetTexture = nullptr;
-			//FreeLibrary(mod);
-			mod = nullptr;
+			modInterface->UnInit(ImGui::GetCurrentContext());
+			modFree(modInterface);
+			modInterface = nullptr;
 		}
 /////////////////////////////////////////////////////////////////////////////////
 		ImGui::DestroyContext(_imgui_context);
@@ -213,15 +211,15 @@ namespace reshade
 
 		_imgui_font_atlas_texture.reset();
 
-		if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
+		if (modInterface)
 		{
-			int textures = modTextureBegin();
+			int textures = modInterface->TextureBegin();
 			_imgui_mod_atlas_textures.clear();
 			for (int texidx = 0; texidx < textures; ++texidx)
 			{
-				modSetTexture(texidx, nullptr);
+				modInterface->SetTexture(texidx, nullptr);
 			}
-			modTextureEnd();
+			modInterface->TextureEnd();
 		}
 		LOG(INFO) << "Destroyed runtime environment on runtime " << this << ".";
 
@@ -243,32 +241,32 @@ namespace reshade
 	bool runtime::init_imgui_mod_atlases()
 	{
 		bool ret = true;
-		if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
+		if (modInterface)
 		{
-			int textures = modTextureBegin();
+			int textures = modInterface->TextureBegin();
 			if(_imgui_mod_atlas_textures.size()<textures) _imgui_mod_atlas_textures.resize(textures);
 
 			for (int texidx = 0; texidx < textures; ++texidx)
 			{
 				if (init_imgui_mod_atlas(texidx))
 				{
-					modSetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
+					modInterface->SetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
 				}
 				else
 				{
-					modSetTexture(texidx, nullptr);
+					modInterface->SetTexture(texidx, nullptr);
 				}
 			}
-			modTextureEnd();
+			modInterface->TextureEnd();
 		}
 		return ret;
 	}
 	void runtime::update_fonts()
 	{
 		/////////////////////////////////////////////////////////////////////////////////
-		if (modUpdateFont)
+		if (modInterface)
 		{
-			if (modUpdateFont(_imgui_context))
+			if (modInterface->UpdateFont(_imgui_context))
 			{
 				_imgui_font_atlas_texture.reset();
 				init_imgui_font_atlas();
@@ -277,9 +275,9 @@ namespace reshade
 
 		if (_show_mod)
 		{
-			if (modTextureBegin && modTextureEnd && modTextureData && modGetTextureDirtyRect && modSetTexture)
+			if (modInterface)
 			{
-				int textures = modTextureBegin();
+				int textures = modInterface->TextureBegin();
 				if (_imgui_mod_atlas_textures.size() < textures) _imgui_mod_atlas_textures.resize(textures);
 
 				for (int texidx = 0; texidx < textures; ++texidx)
@@ -289,18 +287,18 @@ namespace reshade
 					{
 						if (!update_imgui_mod_atlas(texidx))
 						{
-							modSetTexture(texidx, nullptr);
+							modInterface->SetTexture(texidx, nullptr);
 						}
 					}
 					else
 					{
 						if (init_imgui_mod_atlas(texidx))
 						{
-							modSetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
+							modInterface->SetTexture(texidx, _imgui_mod_atlas_textures[texidx].get());
 						}
 						else
 						{
-							modSetTexture(texidx, nullptr);
+							modInterface->SetTexture(texidx, nullptr);
 						}
 					}
 				}
@@ -311,7 +309,7 @@ namespace reshade
 				//		update_imgui_mod_atlas(texidx);
 				//	}
 				//}
-				modTextureEnd();
+				modInterface->TextureEnd();
 			}
 		}
 		/////////////////////////////////////////////////////////////////////////////////
@@ -1296,15 +1294,15 @@ namespace reshade
 		{
 			// mod menu
 			/////////////////////////////////////////////////////////////////////////////////
-			if (modMenu)
+			if (modInterface)
 			{
 				// toggle
-				modMenu(nullptr);
+				modInterface->Menu(nullptr);
 			}
 			/////////////////////////////////////////////////////////////////////////////////
 		}
 
-		if (!(_show_menu || _show_clock || _show_framerate || show_splash || (_show_mod && modRender)))
+		if (!(_show_menu || _show_clock || _show_framerate || show_splash || (_show_mod && modInterface)))
 		{
 			_input->block_mouse_input(false);
 			_input->block_keyboard_input(false);
@@ -1354,9 +1352,9 @@ namespace reshade
 
 		// Create ImGui widgets and windows
 		/////////////////////////////////////////////////////////////////////////////////
-		if (_show_mod && modRender)
+		if (_show_mod && modInterface)
 		{
-			modRender(ImGui::GetCurrentContext());
+			modInterface->Render(ImGui::GetCurrentContext());
 		}
 		/////////////////////////////////////////////////////////////////////////////////
 
@@ -1404,7 +1402,7 @@ namespace reshade
 					_menu_key_data[1] ? "Ctrl + " : "",
 					_menu_key_data[2] ? "Shift + " : "",
 					keyboard_keys[_menu_key_data[0]]);
-				if (modRender)
+				if (modInterface)
 				{
 					ImGui::Text(
 						"Press '%s%s%s' to open the mod and '%s%s%s' to open the mod menu",

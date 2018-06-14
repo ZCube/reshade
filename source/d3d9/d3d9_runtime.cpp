@@ -242,7 +242,7 @@ namespace reshade::d3d9
 	}
 	bool d3d9_runtime::init_imgui_mod_atlas(int texidx)
 	{
-		if (!modTextureData)
+		if (!modInterface)
 			return true;
 
 		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
@@ -251,7 +251,7 @@ namespace reshade::d3d9
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+		modInterface->TextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
@@ -290,7 +290,7 @@ namespace reshade::d3d9
 
 	bool d3d9_runtime::update_imgui_mod_atlas(int texidx)
 	{
-		if (!modTextureData)
+		if (!modInterface)
 			return true;
 
 		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
@@ -299,13 +299,13 @@ namespace reshade::d3d9
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+		modInterface->TextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
 
 		RECT rect;
-		if (modGetTextureDirtyRect(texidx, 0, &rect))
+		if (modInterface->GetTextureDirtyRect(texidx, 0, &rect))
 		{
 			int rectidx = 0;
 			D3DLOCKED_RECT mod_atlas_rect;
@@ -317,7 +317,7 @@ namespace reshade::d3d9
 			{
 				if (mod_atlas_rect.pBits)
 				{
-					while (modGetTextureDirtyRect(texidx, rectidx++, &rect))
+					while (modInterface->GetTextureDirtyRect(texidx, rectidx++, &rect))
 					{
 						int bx = std::min<int>(rect.left, std::min<int>(rect.right, width - 1));
 						int by = std::min<int>(rect.top, std::min<int>(rect.bottom, height - 1));
@@ -336,7 +336,7 @@ namespace reshade::d3d9
 			}
 		}
 
-		if (modGetTextureDirtyRect(texidx, 0, &rect))
+		if (modInterface->GetTextureDirtyRect(texidx, 0, &rect))
 		{
 			D3DLOCKED_RECT mod_atlas_rect;
 			auto texture = _imgui_mod_atlas_texture->as<d3d9_tex_data>();

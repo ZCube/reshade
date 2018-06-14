@@ -322,7 +322,7 @@ namespace reshade::opengl
 	}
 	bool opengl_runtime::init_imgui_mod_atlas(int texidx)
 	{
-		if (!modTextureData)
+		if (!modInterface)
 			return true;
 
 		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
@@ -331,7 +331,7 @@ namespace reshade::opengl
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+		modInterface->TextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
@@ -353,7 +353,7 @@ namespace reshade::opengl
 
 	bool opengl_runtime::update_imgui_mod_atlas(int texidx)
 	{
-		if (!modTextureData)
+		if (!modInterface)
 			return true;
 
 		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
@@ -362,7 +362,7 @@ namespace reshade::opengl
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+		modInterface->TextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;

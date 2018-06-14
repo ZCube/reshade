@@ -431,7 +431,7 @@ namespace reshade::d3d11
 	}
 	bool d3d11_runtime::init_imgui_mod_atlas(int texidx)
 	{
-		if (!modTextureData)
+		if (!modInterface)
 			return true;
 
 		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
@@ -440,7 +440,7 @@ namespace reshade::d3d11
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+		modInterface->TextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
@@ -488,7 +488,7 @@ namespace reshade::d3d11
 
 	bool d3d11_runtime::update_imgui_mod_atlas(int texidx)
 	{
-		if (!modTextureData)
+		if (!modInterface)
 			return true;
 
 		auto& _imgui_mod_atlas_texture = _imgui_mod_atlas_textures.at(texidx);
@@ -502,13 +502,13 @@ namespace reshade::d3d11
 		unsigned char *pixels;
 
 		ImGui::SetCurrentContext(_imgui_context);
-		modTextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
+		modInterface->TextureData(texidx, &pixels, &width, &height, &bits_per_pixel);
 
 		if (pixels == nullptr)
 			return true;
 
 		RECT rect;
-		if (modGetTextureDirtyRect(texidx, 0, &rect))
+		if (modInterface->GetTextureDirtyRect(texidx, 0, &rect))
 		{
 			ID3D11DeviceContext *devicecontext = nullptr;
 			_device->GetImmediateContext(&devicecontext);
@@ -523,7 +523,7 @@ namespace reshade::d3d11
 					if (res.pData)
 					{
 						//while (modGetTextureDirtyRect(texidx, rectidx++, &rect))
-						if (modGetTextureDirtyRect(texidx, -1, &rect))
+						if (modInterface->GetTextureDirtyRect(texidx, -1, &rect))
 						{
 							int bx = std::min<int>(rect.left, std::min<int>(rect.right, width - 1));
 							int by = std::min<int>(rect.top, std::min<int>(rect.bottom, height - 1));
